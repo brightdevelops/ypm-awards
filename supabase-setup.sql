@@ -1,7 +1,8 @@
 -- ============================================================
 -- YPM Youth Awards — Supabase setup
 -- Paste into Supabase -> SQL Editor -> New query -> Run.
--- IMPORTANT: change the admin key on line 42 before you run it.
+-- IMPORTANT: change the admin key in section 2 before you run it.
+-- Safe to run more than once.
 -- ============================================================
 
 -- ---------- 1. Tables ----------
@@ -57,6 +58,8 @@ alter table public.ballots      enable row level security;
 alter table public.votes        enable row level security;
 
 -- ---------- 4. Public functions (used by the voting page) ----------
+-- Written with ":=" assignments rather than "SELECT ... INTO", because the
+-- Supabase SQL editor can misread "INTO v_xxx" as a table name.
 
 create or replace function public.voting_status()
 returns json
@@ -76,13 +79,11 @@ security definer
 set search_path = public
 as $$
 declare
-  v_open   boolean;
-  v_phone  text;
-  v_ballot public.ballots;
-  v_picks  json;
+  v_phone    text;
+  v_ballot   public.ballots;
+  v_inserted int;
 begin
-  select voting_open into v_open from settings where id = 1;
-  if not coalesce(v_open, true) then
+  if not coalesce((select voting_open from settings where id = 1), true) then
     return json_build_object('status', 'closed');
   end if;
 
@@ -92,45 +93,34 @@ begin
     return json_build_object('status', 'error', 'message', 'name and phone required');
   end if;
 
-  select * into v_ballot from ballots where voter_phone = v_phone;
+  -- Create the ballot if this phone has none. "do nothing" also covers two
+  -- devices starting at the same instant.
+  insert into ballots (voter_name, voter_phone)
+  values (btrim(p_name), v_phone)
+  on conflict (voter_phone) do nothing;
 
-  if found then
-    if v_ballot.completed_at is not null then
-      return json_build_object('status', 'already_voted');
-    end if;
+  get diagnostics v_inserted = row_count;
 
-    select coalesce(json_agg(json_build_object(
-             'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
-      into v_picks
-      from votes where ballot_id = v_ballot.id;
+  v_ballot := (select b from ballots b where b.voter_phone = v_phone);
 
-    return json_build_object('status', 'resumed',
-                             'ballot_id', v_ballot.id, 'picks', v_picks);
+  if v_inserted > 0 then
+    return json_build_object('status', 'started',
+                             'ballot_id', v_ballot.id, 'picks', '[]'::json);
   end if;
 
-  begin
-    insert into ballots (voter_name, voter_phone)
-    values (btrim(p_name), v_phone)
-    returning * into v_ballot;
-  exception when unique_violation then
-    -- Two devices started at the same instant; fall back to the existing ballot.
-    select * into v_ballot from ballots where voter_phone = v_phone;
+  if v_ballot.completed_at is not null then
+    return json_build_object('status', 'already_voted');
+  end if;
 
-    if v_ballot.completed_at is not null then
-      return json_build_object('status', 'already_voted');
-    end if;
-
-    select coalesce(json_agg(json_build_object(
-             'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
-      into v_picks
-      from votes where ballot_id = v_ballot.id;
-
-    return json_build_object('status', 'resumed',
-                             'ballot_id', v_ballot.id, 'picks', v_picks);
-  end;
-
-  return json_build_object('status', 'started',
-                           'ballot_id', v_ballot.id, 'picks', '[]'::json);
+  return json_build_object(
+    'status', 'resumed',
+    'ballot_id', v_ballot.id,
+    'picks', (
+      select coalesce(json_agg(json_build_object(
+               'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
+        from votes where ballot_id = v_ballot.id
+    )
+  );
 end;
 $$;
 
@@ -142,20 +132,17 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  v_open      boolean;
-  v_completed timestamptz;
 begin
-  select voting_open into v_open from settings where id = 1;
-  if not coalesce(v_open, true) then
+  if not coalesce((select voting_open from settings where id = 1), true) then
     return json_build_object('status', 'closed');
   end if;
 
-  select completed_at into v_completed from ballots where id = p_ballot_id;
-  if not found then
+  if not exists (select 1 from ballots where id = p_ballot_id) then
     return json_build_object('status', 'error', 'message', 'unknown ballot');
   end if;
-  if v_completed is not null then
+
+  if exists (select 1 from ballots
+              where id = p_ballot_id and completed_at is not null) then
     return json_build_object('status', 'error', 'message', 'already submitted');
   end if;
 
@@ -174,11 +161,8 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  v_open boolean;
 begin
-  select voting_open into v_open from settings where id = 1;
-  if not coalesce(v_open, true) then
+  if not coalesce((select voting_open from settings where id = 1), true) then
     return json_build_object('status', 'closed');
   end if;
 
@@ -202,11 +186,8 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  v_ok boolean;
 begin
-  select (admin_key = p_key) into v_ok from admin_config where id = 1;
-  if not coalesce(v_ok, false) then
+  if not coalesce((select admin_key = p_key from admin_config where id = 1), false) then
     return json_build_object('status', 'unauthorized');
   end if;
 
@@ -242,11 +223,8 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  v_ok boolean;
 begin
-  select (admin_key = p_key) into v_ok from admin_config where id = 1;
-  if not coalesce(v_ok, false) then
+  if not coalesce((select admin_key = p_key from admin_config where id = 1), false) then
     return json_build_object('status', 'unauthorized');
   end if;
 
