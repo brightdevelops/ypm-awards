@@ -3,7 +3,9 @@ import Admin from './pages/Admin.jsx'
 import { configured } from './supabaseClient.js'
 
 export default function App() {
-  const isAdmin = window.location.pathname.replace(/\/+$/, '') === '/admin'
+  // Both doors show the same dashboard; each has its own key (see admin_keys).
+  const path = window.location.pathname.replace(/\/+$/, '')
+  const isAdmin = path === '/admin' || path === '/inventor'
 
   if (!configured) {
     return (

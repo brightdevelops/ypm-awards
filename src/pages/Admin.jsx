@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
 
-const KEY_STORE = 'ypm-awards-admin-key'
+// One saved key per door, so signing in at /inventor doesn't overwrite /admin.
+const DOOR = window.location.pathname.replace(/\/+$/, '') || '/admin'
+const KEY_STORE = `ypm-awards-admin-key${DOOR}`
 
 export default function Admin() {
   const [key, setKey] = useState(() => sessionStorage.getItem(KEY_STORE) || '')
@@ -88,7 +90,9 @@ export default function Admin() {
       <div className="inner wide">
         <div className="adminHead">
           <div>
-            <p className="eyebrow">YPM Youth Awards</p>
+            <p className="eyebrow">
+              YPM Youth Awards{data.key_label ? ` · ${data.key_label}` : ''}
+            </p>
             <h1 className="display">Results dashboard</h1>
           </div>
           <button className="btn ghost small" onClick={() => load()} disabled={busy}>
