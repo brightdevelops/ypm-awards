@@ -119,6 +119,6 @@ src/data/categories.js   the ballot — edit here
 src/pages/Vote.jsx       voter flow
 src/pages/Admin.jsx      results dashboard
 src/styles.css           all styling
-supabase-setup.sql       run once in Supabase
-awards.json              original nomination counts, for reference
+supabase-setup.sql       run once on a new Supabase project
+supabase-upgrade.sql     run once to upgrade a database set up before /inventor
 ```

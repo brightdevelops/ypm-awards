@@ -3,7 +3,7 @@
 --
 -- Run this ONCE on a brand-new Supabase project.
 -- If your database was created before the /inventor page existed, do NOT
--- re-run this — run supabase-add-dev-key.sql instead, which upgrades an
+-- re-run this — run supabase-upgrade.sql instead, which upgrades an
 -- existing database in place without touching your data.
 --
 -- Paste into Supabase -> SQL Editor -> New query -> Run.
