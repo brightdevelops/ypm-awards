@@ -1,8 +1,13 @@
 -- ============================================================
 -- YPM Youth Awards — Supabase setup
+--
+-- Run this ONCE on a brand-new Supabase project.
+-- If your database was created before the /inventor page existed, do NOT
+-- re-run this — run supabase-add-dev-key.sql instead, which upgrades an
+-- existing database in place without touching your data.
+--
 -- Paste into Supabase -> SQL Editor -> New query -> Run.
--- IMPORTANT: change the admin key in section 2 before you run it.
--- Safe to run more than once.
+-- IMPORTANT: change both keys in section 2 before you run it.
 -- ============================================================
 
 -- ---------- 1. Tables ----------
@@ -13,10 +18,12 @@ create table if not exists public.settings (
   constraint settings_singleton check (id = 1)
 );
 
-create table if not exists public.admin_config (
-  id         int primary key default 1,
-  admin_key  text not null,
-  constraint admin_config_singleton check (id = 1)
+-- One row per person who can open the dashboard. Keys are independent:
+-- changing or revoking one doesn't affect the others.
+create table if not exists public.admin_keys (
+  key         text primary key,
+  label       text not null,
+  created_at  timestamptz not null default now()
 );
 
 create table if not exists public.ballots (
@@ -42,24 +49,24 @@ insert into public.settings (id, voting_open)
 values (1, true)
 on conflict (id) do nothing;
 
--- >>> CHANGE 'change-this-key' TO YOUR OWN SECRET <<<
-insert into public.admin_config (id, admin_key)
-values (1, 'change-this-key')
-on conflict (id) do nothing;
+-- >>> CHANGE BOTH KEYS BELOW TO YOUR OWN SECRETS <<<
+-- 'leader' opens /admin, 'inventor' opens /inventor. Same dashboard, own keys.
+insert into public.admin_keys (key, label) values
+  ('change-this-leader-key',   'leader'),
+  ('change-this-inventor-key', 'inventor')
+on conflict (key) do nothing;
 
 -- ---------- 3. Lock the tables ----------
 -- RLS on with no policies means the public anon key cannot read or write
 -- these tables at all. Every action goes through the functions below, so
 -- nobody can read the votes from the browser before the announcement.
 
-alter table public.settings     enable row level security;
-alter table public.admin_config enable row level security;
-alter table public.ballots      enable row level security;
-alter table public.votes        enable row level security;
+alter table public.settings    enable row level security;
+alter table public.admin_keys  enable row level security;
+alter table public.ballots     enable row level security;
+alter table public.votes       enable row level security;
 
 -- ---------- 4. Public functions (used by the voting page) ----------
--- Written with ":=" assignments rather than "SELECT ... INTO", because the
--- Supabase SQL editor can misread "INTO v_xxx" as a table name.
 
 create or replace function public.voting_status()
 returns json
@@ -79,48 +86,68 @@ security definer
 set search_path = public
 as $$
 declare
-  v_phone    text;
-  v_ballot   public.ballots;
-  v_inserted int;
+  v_open   boolean;
+  v_phone  text;
+  v_ballot public.ballots;
+  v_picks  json;
 begin
-  if not coalesce((select voting_open from settings where id = 1), true) then
+  select voting_open into v_open from settings where id = 1;
+  if not coalesce(v_open, true) then
     return json_build_object('status', 'closed');
   end if;
 
+  -- Must match normalizePhone() in src/lib/phone.js, so the same person
+  -- is one voter however they type their number.
   v_phone := regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g');
+  if v_phone like '234%' and length(v_phone) >= 12 then
+    v_phone := '0' || substr(v_phone, 4);
+  elsif length(v_phone) = 10 and v_phone not like '0%' then
+    v_phone := '0' || v_phone;
+  end if;
 
   if coalesce(btrim(p_name), '') = '' or length(v_phone) < 10 then
     return json_build_object('status', 'error', 'message', 'name and phone required');
   end if;
 
-  -- Create the ballot if this phone has none. "do nothing" also covers two
-  -- devices starting at the same instant.
-  insert into ballots (voter_name, voter_phone)
-  values (btrim(p_name), v_phone)
-  on conflict (voter_phone) do nothing;
+  select * into v_ballot from ballots where voter_phone = v_phone;
 
-  get diagnostics v_inserted = row_count;
+  if found then
+    if v_ballot.completed_at is not null then
+      return json_build_object('status', 'already_voted');
+    end if;
 
-  v_ballot := (select b from ballots b where b.voter_phone = v_phone);
+    select coalesce(json_agg(json_build_object(
+             'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
+      into v_picks
+      from votes where ballot_id = v_ballot.id;
 
-  if v_inserted > 0 then
-    return json_build_object('status', 'started',
-                             'ballot_id', v_ballot.id, 'picks', '[]'::json);
+    return json_build_object('status', 'resumed',
+                             'ballot_id', v_ballot.id, 'picks', v_picks);
   end if;
 
-  if v_ballot.completed_at is not null then
-    return json_build_object('status', 'already_voted');
-  end if;
+  begin
+    insert into ballots (voter_name, voter_phone)
+    values (btrim(p_name), v_phone)
+    returning * into v_ballot;
+  exception when unique_violation then
+    -- Two devices started at the same instant; fall back to the existing ballot.
+    select * into v_ballot from ballots where voter_phone = v_phone;
 
-  return json_build_object(
-    'status', 'resumed',
-    'ballot_id', v_ballot.id,
-    'picks', (
-      select coalesce(json_agg(json_build_object(
-               'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
-        from votes where ballot_id = v_ballot.id
-    )
-  );
+    if v_ballot.completed_at is not null then
+      return json_build_object('status', 'already_voted');
+    end if;
+
+    select coalesce(json_agg(json_build_object(
+             'category_id', category_id, 'nominee_name', nominee_name)), '[]'::json)
+      into v_picks
+      from votes where ballot_id = v_ballot.id;
+
+    return json_build_object('status', 'resumed',
+                             'ballot_id', v_ballot.id, 'picks', v_picks);
+  end;
+
+  return json_build_object('status', 'started',
+                           'ballot_id', v_ballot.id, 'picks', '[]'::json);
 end;
 $$;
 
@@ -132,17 +159,20 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_open      boolean;
+  v_completed timestamptz;
 begin
-  if not coalesce((select voting_open from settings where id = 1), true) then
+  select voting_open into v_open from settings where id = 1;
+  if not coalesce(v_open, true) then
     return json_build_object('status', 'closed');
   end if;
 
-  if not exists (select 1 from ballots where id = p_ballot_id) then
+  select completed_at into v_completed from ballots where id = p_ballot_id;
+  if not found then
     return json_build_object('status', 'error', 'message', 'unknown ballot');
   end if;
-
-  if exists (select 1 from ballots
-              where id = p_ballot_id and completed_at is not null) then
+  if v_completed is not null then
     return json_build_object('status', 'error', 'message', 'already submitted');
   end if;
 
@@ -161,8 +191,11 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_open boolean;
 begin
-  if not coalesce((select voting_open from settings where id = 1), true) then
+  select voting_open into v_open from settings where id = 1;
+  if not coalesce(v_open, true) then
     return json_build_object('status', 'closed');
   end if;
 
@@ -186,13 +219,17 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_label text;
 begin
-  if not coalesce((select admin_key = p_key from admin_config where id = 1), false) then
+  select label into v_label from admin_keys where key = p_key;
+  if v_label is null then
     return json_build_object('status', 'unauthorized');
   end if;
 
   return json_build_object(
     'status', 'ok',
+    'key_label', v_label,
     'voting_open', coalesce((select voting_open from settings where id = 1), true),
     'ballots_started',   (select count(*) from ballots),
     'ballots_completed', (select count(*) from ballots where completed_at is not null),
@@ -224,7 +261,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if not coalesce((select admin_key = p_key from admin_config where id = 1), false) then
+  if not exists (select 1 from admin_keys where key = p_key) then
     return json_build_object('status', 'unauthorized');
   end if;
 
@@ -243,8 +280,14 @@ grant execute on function public.get_tally(text)                        to anon;
 grant execute on function public.set_voting_open(text, boolean)         to anon;
 
 -- ---------- Handy queries for the night ----------
--- Change the admin key later:
---   update public.admin_config set admin_key = 'new-key' where id = 1;
+-- See who has a key:
+--   select label, key from public.admin_keys;
+-- Change one key without touching the other:
+--   update public.admin_keys set key = 'new-key' where label = 'leader';
+-- Revoke a key:
+--   delete from public.admin_keys where label = 'leader';
+-- Add another person:
+--   insert into public.admin_keys (key, label) values ('some-key', 'pastor');
 -- Close voting from SQL instead of the dashboard:
 --   update public.settings set voting_open = false where id = 1;
 -- Remove a test ballot (votes go with it):
