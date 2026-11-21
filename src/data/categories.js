@@ -1,6 +1,10 @@
 // The ballot. Edit names here, commit, and Vercel redeploys.
 // `photo` is optional — add a filename later (put the image in /public/nominees/)
 // and the card shows the photo instead of the initial.
+//
+// Source: leader's "YPM NOMINATIONS 2026" list, 21 Nov 2026.
+// Youth Personality of the Year and Teenager of the Year are NOT here —
+// the list had no nominees for them. Paste them in when they arrive.
 
 export const SECTIONS = [
   {
@@ -12,7 +16,7 @@ export const SECTIONS = [
         nominees: [
           { name: 'Peace Williams' },
           { name: 'Sarah Bakare' },
-          { name: 'Queen Solomon' },
+          { name: 'Chizoba Uzor' },
         ],
       },
       {
@@ -20,35 +24,35 @@ export const SECTIONS = [
         name: 'Most Dedicated Volunteer',
         nominees: [
           { name: 'Chizoba Uzor' },
-          { name: 'Precious John' },
-          { name: 'Sarah Bakare' },
+          { name: 'Blessing Paul' },
+          { name: 'Kunle Salami' },
         ],
       },
       {
         id: 'behind-the-scene-hero',
-        name: 'Behind the Scene Hero',
+        name: 'Behind-the-Scenes Hero',
         nominees: [
           { name: 'Ebenezer Obi' },
-          { name: 'Cherish Iwuji' },
-          { name: 'Sarah Bakare' },
+          { name: 'Sylvester Okosodo' },
+          { name: 'Kunle Salami' },
         ],
       },
       {
         id: 'most-supportive-member',
         name: 'Most Supportive Member',
         nominees: [
-          { name: 'Ehis Ighalo' },
-          { name: 'PST Solomon' },
-          { name: 'Oluwayomi Solomon' },
+          { name: 'Goodness Emeka' },
+          { name: 'Elizabeth Enikanologbon' },
+          { name: 'Favour Ejiogu' },
         ],
       },
       {
         id: 'consistency',
         name: 'Consistency Award',
         nominees: [
-          { name: 'Norah Oboh' },
-          { name: 'Queen Solomon' },
-          { name: 'Oluwayomi Solomon' },
+          { name: 'Nora Oboh' },
+          { name: 'Blessing Ukuoha' },
+          { name: 'Ebenezer Obi' },
         ],
       },
     ],
@@ -61,7 +65,7 @@ export const SECTIONS = [
         name: 'Best Male Vocalist',
         nominees: [
           { name: 'Monday Praise' },
-          { name: 'Somadinna' },
+          { name: 'Kelvin Ekwemuka' },
           { name: 'Daniel Chukwukere' },
         ],
       },
@@ -70,8 +74,8 @@ export const SECTIONS = [
         name: 'Best Female Vocalist',
         nominees: [
           { name: 'Favour Akpan' },
-          { name: 'Hephzibah' },
-          { name: 'Sarah Bakare' },
+          { name: 'Rotimi Damilola Hephzibah' },
+          { name: 'Blessing Paul' },
         ],
       },
       {
@@ -79,14 +83,14 @@ export const SECTIONS = [
         name: 'Best Instrumentalist of the Year',
         nominees: [
           { name: 'Raphael Tosin' },
-          { name: 'Ewomazino' },
+          { name: 'Goodnews Ewomazino' },
         ],
       },
       {
         id: 'creative-talent',
         name: 'Creative Talent of the Year',
         nominees: [
-          { name: 'Arthur Adebolagun' },
+          { name: 'Adebolagun Arthur' },
           { name: 'Blessing Paul' },
           { name: 'Daniel Olamitoye' },
         ],
@@ -95,7 +99,7 @@ export const SECTIONS = [
         id: 'media-personality',
         name: 'Media Personality of the Year',
         nominees: [
-          { name: 'Queen Solomon' },
+          { name: 'Mitchel Nwanchukwu' },
           { name: 'Lillian Williams' },
           { name: 'Ebenezer Obi' },
         ],
@@ -110,17 +114,8 @@ export const SECTIONS = [
         name: 'Excellent Character Award',
         nominees: [
           { name: 'Lillian Williams' },
-          { name: 'Sarah Bakare' },
-          { name: 'Queen Solomon' },
-        ],
-      },
-      {
-        id: 'humility',
-        name: 'Humility Award',
-        nominees: [
           { name: 'Ebenezer Obi' },
-          { name: 'Queen Solomon' },
-          { name: 'Kunle Salami' },
+          { name: 'Peace Williams' },
         ],
       },
       {
@@ -128,26 +123,8 @@ export const SECTIONS = [
         name: 'Most Disciplined Youth',
         nominees: [
           { name: 'Sarah Bakare' },
-          { name: 'Queen Solomon' },
+          { name: 'Chizoba Uzor' },
           { name: 'Ebenezer Obi' },
-        ],
-      },
-      {
-        id: 'positive-influence',
-        name: 'Positive Influence Award',
-        nominees: [
-          { name: 'Peace Williams' },
-          { name: 'Queen Solomon' },
-          { name: 'Kunle Salami' },
-        ],
-      },
-      {
-        id: 'role-model',
-        name: 'Role Model of the Year',
-        nominees: [
-          { name: 'Sarah Bakare' },
-          { name: 'PST Solomon' },
-          { name: 'Queen Solomon' },
         ],
       },
     ],
@@ -156,29 +133,11 @@ export const SECTIONS = [
     section: 'Special Recognition',
     categories: [
       {
-        id: 'youth-personality',
-        name: 'Youth Personality of the Year',
-        nominees: [
-          { name: 'Ehis Ighalo' },
-          { name: 'Queen Solomon' },
-          { name: 'Ebenezer Obi' },
-        ],
-      },
-      {
-        id: 'rising-star',
-        name: 'Rising Star Award',
-        nominees: [
-          { name: 'Precious John' },
-          { name: 'Amazing Okechukwu' },
-          { name: 'Lillian Williams' },
-        ],
-      },
-      {
         id: 'best-dressed-male',
         name: 'Best Dressed Male',
         nominees: [
           { name: 'Ebenezer Obi' },
-          { name: 'Mitchell' },
+          { name: 'Ikenna Ndubuisi' },
           { name: 'Raphael Tosin' },
         ],
       },
@@ -187,17 +146,16 @@ export const SECTIONS = [
         name: 'Best Dressed Female',
         nominees: [
           { name: 'Sarah Bakare' },
-          { name: 'Norah Oboh' },
-          { name: 'Hephzibah' },
+          { name: 'Nora Oboh' },
+          { name: 'Blessing Jakiri' },
         ],
       },
       {
         id: 'most-hilarious',
         name: 'Most Hilarious Youth of the Year',
         nominees: [
-          { name: 'Ewomazino' },
+          { name: 'Goodnews Ewomazino' },
           { name: 'Ehis Ighalo' },
-          { name: 'Precious John' },
         ],
       },
     ],
@@ -209,7 +167,7 @@ export const SECTIONS = [
         id: 'heart-of-a-servant',
         name: 'Heart of a Servant Award',
         nominees: [
-          { name: 'Arthur Adebolagun' },
+          { name: 'Amazing Okechukwu' },
           { name: 'Prosper Ossaiku' },
           { name: 'Queen Solomon' },
         ],
@@ -218,41 +176,36 @@ export const SECTIONS = [
         id: 'bible-class-achiever',
         name: 'Bible Class Achiever',
         nominees: [
-          { name: 'Prosper Ossaiku' },
+          { name: 'Ifeanyi Ojianwuna' },
           { name: 'Ebube Simeon' },
-          { name: 'Amazing Okechukwu' },
-        ],
-      },
-      {
-        id: 'teenager-of-the-year',
-        name: 'Teenager of the Year',
-        nominees: [
-          { name: 'Treasure Okafor' },
-          { name: 'Precious John' },
-          { name: 'Ebube Simeon' },
+          { name: 'Bright' },
         ],
       },
       {
         id: 'teen-rising-star',
-        name: 'Teen Rising Star Award',
+        name: 'Rising Star Award',
         nominees: [
           { name: 'Prosper Ossaiku' },
           { name: 'Treasure Okafor' },
-          { name: 'Precious John' },
-        ],
-      },
-      {
-        id: 'youth-leader',
-        name: 'Youth Leader Award',
-        nominees: [
-          { name: 'Queen Solomon' },
-          { name: 'Arthur Adebolagun' },
-          { name: 'Precious John' },
+          { name: 'Amazing Okechukwu' },
         ],
       },
     ],
   },
 ]
+
+/* ---------------------------------------------------------------
+   Waiting on nominees. When your leader sends them, drop the block
+   into the right section above and delete these notes.
+
+   Special Recognition:
+      { id: 'youth-personality', name: 'Youth Personality of the Year',
+        nominees: [{ name: '' }, { name: '' }, { name: '' }] },
+
+   Teenage Award of Excellence:
+      { id: 'teenager-of-the-year', name: 'Teenager of the Year',
+        nominees: [{ name: '' }, { name: '' }, { name: '' }] },
+--------------------------------------------------------------- */
 
 // Flat ballot order, with the section label carried on each category.
 export const BALLOT = SECTIONS.flatMap((s) =>
