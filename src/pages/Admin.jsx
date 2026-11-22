@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
+import { buildResults } from '../lib/tally.js'
+
+const votesLabel = (n) => `${n} ${n === 1 ? 'vote' : 'votes'}`
 
 // One saved session per door, so signing in at /inventor doesn't sign out /admin.
 // Only the session token is kept (it expires after 12 hours), never the key.
@@ -141,11 +144,8 @@ export default function Admin() {
     )
   }
 
-  const byCategory = {}
-  for (const row of data.tally || []) {
-    byCategory[row.category_id] = byCategory[row.category_id] || []
-    byCategory[row.category_id].push(row)
-  }
+  const results = buildResults(BALLOT, data.tally)
+  const { totals } = results
 
   return (
     <div className="shell">
@@ -206,48 +206,95 @@ export default function Admin() {
           </div>
         </div>
 
-        {BALLOT.map((c) => {
-          const rows = (byCategory[c.id] || []).slice().sort((a, b) => b.votes - a.votes)
-          const total = rows.reduce((s, r) => s + Number(r.votes), 0)
-          const top = rows[0]
-          const tie = rows.length > 1 && Number(rows[1].votes) === Number(top?.votes)
+        <p className="dim small tallyNote">
+          Counts include submitted ballots only. Rankings and percentages use votes for the
+          nominees currently on the ballot.
+          {totals.all > totals.current && (
+            <>
+              {' '}
+              {votesLabel(totals.all - totals.current)} were cast for names or categories no
+              longer on the ballot. They are shown separately, as recorded, and are not
+              included in any ranking.
+            </>
+          )}
+        </p>
 
-          return (
-            <div className="card tallyCard" key={c.id}>
-              <div className="tallyHead">
-                <h2>{c.name}</h2>
-                <span className="dim small">
-                  {total} {total === 1 ? 'vote' : 'votes'}
-                  {tie ? ' · tie' : ''}
-                </span>
-              </div>
-
-              {c.nominees.map((n) => {
-                const row = rows.find((r) => r.nominee_name === n.name)
-                const votes = row ? Number(row.votes) : 0
-                const pct = total ? (votes / total) * 100 : 0
-                const leading = !tie && top?.nominee_name === n.name && votes > 0
-
-                return (
-                  <div className="bar" key={n.name}>
-                    <div className="barTop">
-                      <span>
-                        {n.name}
-                        {leading && <span className="barLead">Leading</span>}
-                      </span>
-                      <span className="barVal">
-                        {votes} · {pct.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
+        {results.categories.map((c) => (
+          <div className="card tallyCard" key={c.id}>
+            <div className="tallyHead">
+              <h2>{c.name}</h2>
+              <span className="dim small">
+                {votesLabel(c.currentVotes)} for current nominees
+                {c.tie ? ' · tie' : ''}
+              </span>
             </div>
-          )
-        })}
+
+            {c.nominees.map((n) => (
+              <div className="bar" key={n.name}>
+                <div className="barTop">
+                  <span>
+                    {n.name}
+                    {n.leading && <span className="barLead">Leading</span>}
+                  </span>
+                  <span className="barVal">
+                    {n.votes} · {n.share.toFixed(0)}%
+                  </span>
+                </div>
+                <div className="barTrack">
+                  <div className="barFill" style={{ width: `${n.share}%` }} />
+                </div>
+              </div>
+            ))}
+
+            {c.historical.length > 0 && (
+              <div className="historical">
+                <p className="historicalHead">
+                  Names no longer on this ballot · {votesLabel(c.historicalVotes)}
+                </p>
+                <p className="dim small">
+                  As recorded. Not included in the ranking or percentages above.
+                </p>
+                <ul className="historicalList">
+                  {c.historical.map((h) => (
+                    <li key={h.name}>
+                      <span>{h.name}</span>
+                      <span className="barVal">{votesLabel(h.votes)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {results.removedCategories.length > 0 && (
+          <div className="card tallyCard historicalSection">
+            <div className="tallyHead">
+              <h2>Categories no longer on the ballot</h2>
+              <span className="dim small">{votesLabel(totals.inRemovedCategories)}</span>
+            </div>
+            <p className="dim small">
+              These categories were removed after voting started. Their votes are kept and shown
+              as recorded, by category ID. They are not ranked and are not part of any current
+              category.
+            </p>
+            {results.removedCategories.map((rc) => (
+              <div className="historical" key={rc.id}>
+                <p className="historicalHead">
+                  <code>{rc.id}</code> · {votesLabel(rc.votes)}
+                </p>
+                <ul className="historicalList">
+                  {rc.nominees.map((n) => (
+                    <li key={n.name}>
+                      <span>{n.name}</span>
+                      <span className="barVal">{votesLabel(n.votes)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="card">
           <button className="linkBtn left" onClick={() => setShowVoters((s) => !s)}>
