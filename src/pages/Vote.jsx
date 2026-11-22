@@ -48,6 +48,9 @@ export default function Vote() {
   const [index, setIndex] = useState(0)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [code, setCode] = useState('')
+  const [needsCode, setNeedsCode] = useState(false) // the server requires a code for new ballots
+  const [showCode, setShowCode] = useState(false) // voter opened the code field, or the server asked
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [justPicked, setJustPicked] = useState(null)
@@ -63,6 +66,7 @@ export default function Vote() {
 
       const open = status?.voting_open !== false
       setVotingOpen(open)
+      setNeedsCode(status?.require_voting_code === true)
 
       const local = loadLocal()
       if (local?.ballotId) {
@@ -109,20 +113,50 @@ export default function Vote() {
     if (!isValidPhone(phone))
       return setError('Enter a valid phone number, e.g. 08012345678.')
 
+    if (needsCode && !code.trim())
+      return setError('Enter the voting code a youth leader gave you.')
+
     setBusy(true)
-    const { data, error: err } = await supabase.rpc('start_ballot', {
+    const { data, error: err } = await supabase.rpc('begin_ballot', {
       p_name: name.trim(),
       p_phone: normalizePhone(phone),
+      p_code: code.trim() || null,
+      // Proves this device started the ballot, so it can be reopened here.
+      p_ballot_id: loadLocal()?.ballotId ?? null,
     })
     setBusy(false)
 
     if (err) return setError('Could not start. Check your connection and try again.')
 
-    if (data?.status === 'closed') {
-      setVotingOpen(false)
-      return setView('closed')
+    switch (data?.status) {
+      case 'started':
+      case 'resumed':
+        break
+      case 'closed':
+        setVotingOpen(false)
+        return setView('closed')
+      case 'already_voted':
+        return setView('voted')
+      case 'code_required':
+        setNeedsCode(true)
+        setShowCode(true)
+        return setError('Enter the voting code a youth leader gave you.')
+      case 'invalid_code':
+        setShowCode(true)
+        return setError(
+          'That code isn’t valid. Check it, or ask a youth leader. Each code works for one person.'
+        )
+      case 'resume_required':
+        setShowCode(true)
+        return setError(
+          'This number already has an unfinished ballot from another phone or browser. ' +
+            'Finish it there, or ask a youth leader for a code for this number and enter it here.'
+        )
+      case 'rate_limited':
+        return setError('Too many attempts. Please wait 15 minutes and try again.')
+      default:
+        return setError('Please check your name and phone number.')
     }
-    if (data?.status === 'already_voted') return setView('voted')
 
     const restored = {}
     for (const v of data?.picks || []) restored[v.category_id] = v.nominee_name
@@ -187,8 +221,17 @@ export default function Vote() {
     setBusy(true)
 
     // Flush anything that failed to save earlier before closing the ballot.
+    // Never submit with a pick missing: once submitted it can't be fixed.
+    let failed = 0
     for (const [categoryId, nomineeName] of Object.entries(unsynced)) {
-      await syncVote(categoryId, nomineeName)
+      if (!(await syncVote(categoryId, nomineeName))) failed++
+    }
+    if (failed > 0) {
+      setBusy(false)
+      return setError(
+        `${failed} of your votes ${failed === 1 ? 'hasn’t' : 'haven’t'} been saved yet. ` +
+          'Check your connection and tap Submit again. If it keeps happening, tell a youth leader.'
+      )
     }
 
     const { data, error: err } = await supabase.rpc('submit_ballot', {
@@ -292,10 +335,39 @@ export default function Vote() {
                 autoComplete="tel"
               />
             </label>
-            {error && <p className="error">{error}</p>}
+            {needsCode || showCode ? (
+              <label>
+                <span>Voting code</span>
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  placeholder="ABCDE-FGHJK"
+                  autoComplete="one-time-code"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  aria-describedby="code-help"
+                />
+              </label>
+            ) : (
+              <button type="button" className="linkBtn left" onClick={() => setShowCode(true)}>
+                I have a voting code
+              </button>
+            )}
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
             <button className="btn primary" disabled={busy}>
               {busy ? 'Starting…' : 'Start voting'}
             </button>
+            {(needsCode || showCode) && (
+              <p className="fineprint" id="code-help">
+                {needsCode
+                  ? 'Each voter needs a code from a youth leader. It works for one person only.'
+                  : 'Codes come from youth leaders. Use yours to continue a ballot from another phone.'}
+              </p>
+            )}
             <p className="fineprint">
               Your number is only used to make sure each person votes once. It is never
               shown to anyone else.

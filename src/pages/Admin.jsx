@@ -2,36 +2,83 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
 
-// One saved key per door, so signing in at /inventor doesn't overwrite /admin.
+// One saved session per door, so signing in at /inventor doesn't sign out /admin.
+// Only the session token is kept (it expires after 12 hours), never the key.
 const DOOR = window.location.pathname.replace(/\/+$/, '') || '/admin'
-const KEY_STORE = `ypm-awards-admin-key${DOOR}`
+const SESSION_STORE = `ypm-awards-admin-session${DOOR}`
+
+function readSession() {
+  try {
+    // Versions before sessions kept the raw key here; don't leave it behind.
+    sessionStorage.removeItem(`ypm-awards-admin-key${DOOR}`)
+    return sessionStorage.getItem(SESSION_STORE) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeSession(token) {
+  try {
+    if (token) sessionStorage.setItem(SESSION_STORE, token)
+    else sessionStorage.removeItem(SESSION_STORE)
+  } catch {
+    /* private mode — you'll just sign in again on reload */
+  }
+}
 
 export default function Admin() {
-  const [key, setKey] = useState(() => sessionStorage.getItem(KEY_STORE) || '')
-  const [authed, setAuthed] = useState(false)
+  const [session, setSession] = useState(readSession)
+  const [key, setKey] = useState('')
   const [data, setData] = useState(null)
+  const [weakKey, setWeakKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showVoters, setShowVoters] = useState(false)
 
-  async function load(k = key) {
+  function signedOut(message = '') {
+    writeSession('')
+    setSession('')
+    setData(null)
+    setError(message)
+  }
+
+  async function load(token = session) {
     setBusy(true)
     setError('')
-    const { data: res, error: err } = await supabase.rpc('get_tally', { p_key: k })
+    const { data: res, error: err } = await supabase.rpc('admin_dashboard', { p_session: token })
     setBusy(false)
 
-    if (err || !res || res.status === 'unauthorized') {
-      setAuthed(false)
-      setError('Wrong admin key.')
-      return
-    }
-    sessionStorage.setItem(KEY_STORE, k)
-    setAuthed(true)
+    if (err) return setError('Could not load. Check your connection and refresh.')
+    if (res?.status !== 'ok') return signedOut('Your session has ended. Please sign in again.')
     setData(res)
   }
 
+  async function signIn(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    const { data: res, error: err } = await supabase.rpc('admin_login', { p_key: key })
+    setBusy(false)
+
+    if (err) return setError('Could not sign in. Check your connection and try again.')
+    if (res?.status === 'rate_limited')
+      return setError('Too many wrong keys. Sign-in is paused for 15 minutes.')
+    if (res?.status !== 'ok') return setError('Wrong admin key.')
+
+    setKey('')
+    setWeakKey(res.weak_key === true)
+    writeSession(res.session)
+    setSession(res.session)
+    await load(res.session)
+  }
+
+  async function signOut() {
+    await supabase.rpc('admin_logout', { p_session: session })
+    signedOut()
+  }
+
   useEffect(() => {
-    if (key) load(key)
+    if (session) load(session)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -41,24 +88,35 @@ export default function Admin() {
     if (!window.confirm(label)) return
 
     setBusy(true)
-    await supabase.rpc('set_voting_open', { p_key: key, p_open: next })
+    const { data: res } = await supabase.rpc('admin_set_voting_open', {
+      p_session: session,
+      p_open: next,
+    })
+    if (res?.status === 'unauthorized') {
+      setBusy(false)
+      return signedOut('Your session has ended. Please sign in again.')
+    }
     await load()
   }
 
-  if (!authed) {
+  if (!session || !data) {
+    if (session && !error) {
+      return (
+        <div className="shell">
+          <div className="inner">
+            <div className="card center dim">Loading…</div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="shell">
         <div className="inner">
           <div className="card">
             <p className="eyebrow">YPM Youth Awards</p>
             <h1 className="display">Admin</h1>
-            <form
-              className="form"
-              onSubmit={(e) => {
-                e.preventDefault()
-                load()
-              }}
-            >
+            <form className="form" onSubmit={signIn}>
               <label>
                 <span>Admin key</span>
                 <input
@@ -68,7 +126,11 @@ export default function Admin() {
                   autoComplete="off"
                 />
               </label>
-              {error && <p className="error">{error}</p>}
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
               <button className="btn primary" disabled={busy}>
                 {busy ? 'Checking…' : 'Open dashboard'}
               </button>
@@ -95,10 +157,27 @@ export default function Admin() {
             </p>
             <h1 className="display">Results dashboard</h1>
           </div>
-          <button className="btn ghost small" onClick={() => load()} disabled={busy}>
-            {busy ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div className="adminActions">
+            <button className="btn ghost small" onClick={() => load()} disabled={busy}>
+              {busy ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button className="btn ghost small" onClick={signOut} disabled={busy}>
+              Sign out
+            </button>
+          </div>
         </div>
+
+        {weakKey && (
+          <p className="warn" role="status">
+            Your admin key is shorter than 16 characters. Ask whoever manages the database to
+            set a longer one with <code>ypm_private.set_admin_key</code>.
+          </p>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
 
         <div className="statRow">
           <div className="stat">
@@ -116,6 +195,14 @@ export default function Admin() {
             <button className="btn ghost small" onClick={toggleVoting} disabled={busy}>
               {data.voting_open ? 'Close voting' : 'Reopen voting'}
             </button>
+          </div>
+          <div className="stat">
+            <span className={`statPill ${data.require_voting_code ? 'open' : 'neutral'}`}>
+              {data.require_voting_code ? 'Codes required' : 'Codes optional'}
+            </span>
+            <span className="statLabel">
+              {data.codes?.redeemed ?? 0} used · {data.codes?.available ?? 0} available
+            </span>
           </div>
         </div>
 
