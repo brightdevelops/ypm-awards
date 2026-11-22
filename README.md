@@ -148,13 +148,15 @@ Counted in the database, per 15 minutes. Only failures count:
 
 | What | Limit |
 |---|---|
-| Wrong code / blocked resume, per phone number | 8 |
-| Wrong code / blocked resume, per IP address | 30 |
+| Wrong code / blocked resume, per phone number (pauses that number) | 8 |
+| Wrong code only, per IP address (pauses further code attempts from it) | 30 |
 | Wrong admin key, per IP address | 10 |
 | Wrong admin key, everyone combined | 60 |
 
 IP addresses come from request headers, which a client can partly forge, so the
-per-phone and combined limits are the ones to rely on.
+per-phone and combined limits are the ones to rely on. Many voters can share one
+address (church Wi-Fi, mobile networks), so the voter IP limit counts only wrong
+codes and never stops anyone starting or resuming a ballot without a code.
 
 ## Security notes
 

@@ -285,13 +285,111 @@ describe('rate limits', () => {
     assert.equal((await begin(db, 'Other', '08200000001')).status, 'started')
   })
 
-  it('locks an IP address after 30 failed codes', async () => {
+  it('locks a phone number after 8 wrong codes, from any IP addresses', async () => {
+    const phone = '08207777777'
+    for (let i = 0; i < 8; i++) {
+      const r = await begin(db, 'x', phone, { p_code: 'WRONG-CODE1' }, { ip: `198.51.100.${50 + i}` })
+      assert.equal(r.status, 'invalid_code')
+    }
+    // paused even without a code, and from a fresh address
+    assert.equal((await begin(db, 'x', phone, {}, { ip: '198.51.100.99' })).status, 'rate_limited')
+  })
+
+  it('after 30 wrong codes from one IP, stops only code attempts from it', async () => {
     const ip = '192.0.2.50'
     for (let i = 0; i < 30; i++) {
-      await begin(db, 'x', `0820000${String(1000 + i)}`, { p_code: 'AAAAA-AAAAA' }, { ip })
+      const r = await begin(db, 'x', `0820000${String(1000 + i)}`, { p_code: 'AAAAA-AAAAA' }, { ip })
+      assert.equal(r.status, 'invalid_code')
     }
-    assert.equal((await begin(db, 'x', '08209999999', {}, { ip })).status, 'rate_limited')
-    assert.equal((await begin(db, 'x', '08209999999', {}, { ip: '192.0.2.51' })).status, 'started')
+    const [code] = await issue(db, await login(db))
+
+    // more code attempts from that address are paused, even a valid code...
+    assert.equal((await begin(db, 'x', '08209999990', { p_code: code.code }, { ip })).status, 'rate_limited')
+    // ...and the pause didn't use up the code or count against that number
+    assert.equal((await sql(db, `select redeemed_at from voting_codes where id = $1`, [code.id]))[0].redeemed_at, null)
+    assert.equal((await sql(db,
+      `select count(*)::int n from rate_events where bucket = 'voter:phone:08209999990'`))[0].n, 0)
+
+    // voters on the same address without a code carry on as normal
+    assert.equal((await begin(db, 'New Voter', '08209999991', {}, { ip })).status, 'started')
+
+    // the same code works from another address
+    assert.equal((await begin(db, 'x', '08209999990', { p_code: code.code }, { ip: '192.0.2.51' })).status, 'started')
+  })
+
+  it('lets many legitimate voters share one IP address', async () => {
+    const ip = '100.64.0.1' // e.g. a mobile network's shared address
+    const [code] = await issue(db, await login(db), { count: 1 })
+
+    // 60 people start ballots from the same address
+    const voters = []
+    for (let i = 0; i < 60; i++) {
+      const phone = `0830000${String(1000 + i)}`
+      const r = await begin(db, `Voter ${i}`, phone, {}, { ip })
+      assert.equal(r.status, 'started', `voter ${i}`)
+      voters.push({ phone, ballotId: r.ballot_id })
+    }
+
+    // each resumes on the same device, several times
+    for (const v of voters) {
+      for (let k = 0; k < 2; k++) {
+        const r = await begin(db, 'Voter', v.phone, { p_ballot_id: v.ballotId }, { ip })
+        assert.equal(r.status, 'resumed')
+      }
+    }
+
+    // one more new voter, and a voter with a valid code, still get in
+    assert.equal((await begin(db, 'Late Voter', '08300009999', {}, { ip })).status, 'started')
+    assert.equal((await begin(db, 'Code Voter', '08300009998', { p_code: code.code }, { ip })).status, 'started')
+    assert.equal((await sql(db,
+      `select count(*)::int n from rate_events where bucket like 'voter:code-ip:%' and bucket like '%100.64.0.1'`))[0].n, 0)
+  })
+
+  it('does not count unfinished-ballot refusals against a shared IP address', async () => {
+    const ip = '100.64.0.2'
+    const others = '100.64.9.9'
+
+    // 40 people with unfinished ballots each try from a new device on the
+    // shared address: more than the 30-per-address limit.
+    for (let i = 0; i < 40; i++) {
+      const phone = `0840000${String(1000 + i)}`
+      assert.equal((await begin(db, `Owner ${i}`, phone, {}, { ip: others })).status, 'started')
+      assert.equal((await begin(db, `Owner ${i}`, phone, {}, { ip })).status, 'resume_required')
+    }
+
+    // nobody else on that address is affected, with or without a code
+    const [code] = await issue(db, await login(db))
+    assert.equal((await begin(db, 'Fresh', '08400009999', {}, { ip })).status, 'started')
+    assert.equal((await begin(db, 'Coded', '08400009998', { p_code: code.code }, { ip })).status, 'started')
+    // the refusals counted against each number instead (1 each)
+    assert.equal((await sql(db,
+      `select count(*)::int n from rate_events where bucket = 'voter:phone:08400001000'`))[0].n, 1)
+  })
+
+  it('does not count ordinary errors against a shared IP address', async () => {
+    const ip = '100.64.0.3'
+    const done = { name: 'Done Voter', phone: '08500000001' }
+    const started = await begin(db, done.name, done.phone, {}, { ip: '100.64.9.8' })
+    await call(db, 'submit_ballot', { p_ballot_id: started.ballot_id })
+
+    for (let i = 0; i < 15; i++) {
+      // missing name, bad phone, already voted
+      assert.equal((await begin(db, '', '08500000002', {}, { ip })).status, 'error')
+      assert.equal((await begin(db, 'x', '123', {}, { ip })).status, 'error')
+      assert.equal((await begin(db, done.name, done.phone, {}, { ip })).status, 'already_voted')
+    }
+    // voting closed
+    await sql(db, `update settings set voting_open = false where id = 1`)
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await begin(db, 'x', '08500000003', {}, { ip })).status, 'closed')
+    }
+    await sql(db, `update settings set voting_open = true where id = 1`)
+
+    // 60 ordinary errors later, a code from that address still works
+    const [code] = await issue(db, await login(db))
+    assert.equal((await begin(db, 'Coded', '08500000004', { p_code: code.code }, { ip })).status, 'started')
+    assert.equal((await sql(db,
+      `select count(*)::int n from rate_events where bucket like '%100.64.0.3'`))[0].n, 0)
   })
 
   it('locks admin sign-in from an IP address after 10 wrong keys', async () => {

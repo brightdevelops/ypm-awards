@@ -200,24 +200,47 @@ returns void language sql as $$
   values (p_actor, p_action, coalesce(p_detail, '{}'::jsonb));
 $$;
 
--- Voter-side limits: 8 failed attempts per phone and 30 per IP address per
--- 15 minutes. Only failures count, so a whole church on one Wi-Fi is fine.
-create or replace function ypm_private.voter_blocked(p_phone text, p_ip text)
+-- Voter-side limits, per 15 minutes:
+--   * Per phone number: 8 failed attempts (wrong codes and blocked resumes).
+--     Once reached, that number is paused, whatever it sends.
+--   * Per IP address: 30 WRONG VOTING CODES. Nothing else counts, and the
+--     pause only stops further code attempts from that address. Many voters
+--     share one address (church Wi-Fi, mobile networks), so one person's
+--     mistakes must never stop the others from starting or resuming a ballot.
+create or replace function ypm_private.phone_blocked(p_phone text)
 returns boolean language sql stable as $$
-  select ypm_private.rate_limited('voter:phone:' || p_phone, 8, interval '15 minutes')
-      or (p_ip <> 'unknown'
-          and ypm_private.rate_limited('voter:ip:' || p_ip, 30, interval '15 minutes'));
+  select ypm_private.rate_limited('voter:phone:' || p_phone, 8, interval '15 minutes');
 $$;
 
-create or replace function ypm_private.voter_failure(p_phone text, p_ip text)
+create or replace function ypm_private.code_ip_blocked(p_ip text)
+returns boolean language sql stable as $$
+  select p_ip <> 'unknown'
+     and ypm_private.rate_limited('voter:code-ip:' || p_ip, 30, interval '15 minutes');
+$$;
+
+-- A failure that isn't a code guess (e.g. resuming from a new device).
+create or replace function ypm_private.phone_failure(p_phone text)
 returns void language plpgsql as $$
 begin
   perform ypm_private.rate_hit('voter:phone:' || p_phone);
+end;
+$$;
+
+-- A wrong voting code: counts against the phone and the IP address.
+create or replace function ypm_private.code_failure(p_phone text, p_ip text)
+returns void language plpgsql as $$
+begin
+  perform ypm_private.phone_failure(p_phone);
   if p_ip <> 'unknown' then
-    perform ypm_private.rate_hit('voter:ip:' || p_ip);
+    perform ypm_private.rate_hit('voter:code-ip:' || p_ip);
   end if;
 end;
 $$;
+
+-- Earlier drafts of this migration (applied to the development project) used
+-- these. Remove them so a re-run leaves only the current helpers.
+drop function if exists ypm_private.voter_blocked(text, text);
+drop function if exists ypm_private.voter_failure(text, text);
 
 create or replace function ypm_private.ballot_picks(p_ballot_id uuid)
 returns json language sql stable as $$
@@ -465,20 +488,23 @@ begin
   end if;
 
   v_ip := ypm_private.client_ip();
-  if ypm_private.voter_blocked(v_phone, v_ip) then
+  if ypm_private.phone_blocked(v_phone) then
     return json_build_object('status', 'rate_limited');
   end if;
 
   -- A code, if given, must exist, not be revoked, and match this number if
-  -- it was issued for one.
+  -- it was issued for one. The IP limit applies to code attempts only.
   v_code_norm := ypm_private.normalize_code(p_code);
   if v_code_norm is not null then
+    if ypm_private.code_ip_blocked(v_ip) then
+      return json_build_object('status', 'rate_limited');
+    end if;
     v_code := (select c from voting_codes c where c.code_hash = ypm_private.sha256_hex(v_code_norm));
     v_code_ok := v_code.id is not null
                  and v_code.revoked_at is null
                  and (v_code.phone is null or v_code.phone = v_phone);
     if not v_code_ok then
-      perform ypm_private.voter_failure(v_phone, v_ip);
+      perform ypm_private.code_failure(v_phone, v_ip);
       return json_build_object('status', 'invalid_code');
     end if;
     v_code_fresh := v_code.redeemed_at is null
@@ -512,7 +538,8 @@ begin
       update ballots set voting_code_id = v_code.id where id = v_ballot.id;
 
     else
-      perform ypm_private.voter_failure(v_phone, v_ip);
+      -- Counts against this number only, never the IP address.
+      perform ypm_private.phone_failure(v_phone);
       return json_build_object('status', 'resume_required');
     end if;
 
@@ -527,7 +554,8 @@ begin
   end if;
 
   if v_code_ok and not v_code_fresh then
-    perform ypm_private.voter_failure(v_phone, v_ip);
+    -- A used or expired code.
+    perform ypm_private.code_failure(v_phone, v_ip);
     return json_build_object('status', 'invalid_code');
   end if;
 
