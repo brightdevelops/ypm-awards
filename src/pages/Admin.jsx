@@ -54,6 +54,7 @@ export default function Admin() {
     if (err) return setError('Could not load. Check your connection and refresh.')
     if (res?.status !== 'ok') return signedOut('Your session has ended. Please sign in again.')
     setData(res)
+    return true
   }
 
   async function signIn(e) {
@@ -100,6 +101,53 @@ export default function Admin() {
       return signedOut('Your session has ended. Please sign in again.')
     }
     await load()
+  }
+
+  async function toggleCodeRequired() {
+    const next = !data.require_voting_code
+    let label
+    if (next) {
+      label =
+        'Require a voting code for new ballots? Anyone without a code won’t be able to start ' +
+        'voting. Unfinished ballots can still be resumed on the same phone.'
+      if ((data.codes?.available ?? 0) === 0) {
+        label += '\n\nWarning: there are no unused codes available yet. Issue codes first, ' +
+          'or nobody new will be able to vote.'
+      }
+    } else {
+      label =
+        'Make voting codes optional? Anyone will be able to start a ballot with just their ' +
+        'name and phone number.'
+    }
+    if (!window.confirm(label)) return
+
+    setBusy(true)
+    let failure = ''
+    try {
+      const { data: res, error: err } = await supabase.rpc('admin_set_code_required', {
+        p_session: session,
+        p_required: next,
+      })
+      if (err) {
+        failure =
+          'Could not change the code setting. Check your connection and try again. ' +
+          'The status below is the current setting.'
+      } else if (res?.status === 'unauthorized') {
+        setBusy(false)
+        return signedOut('Your session has ended. Please sign in again.')
+      } else if (res?.status !== 'ok') {
+        failure = 'Could not change the code setting. The status below is the current setting.'
+      }
+    } catch {
+      failure =
+        'Could not change the code setting. Check your connection and try again. ' +
+        'The status below is the current setting.'
+    }
+
+    // Always show what the server has, never what we hoped to set.
+    // If the refresh itself fails, its own message (or the sign-in screen) is shown instead.
+    const refreshed = await load()
+    if (failure && refreshed) setError(failure)
   }
 
   if (!session || !data) {
@@ -203,6 +251,9 @@ export default function Admin() {
             <span className="statLabel">
               {data.codes?.redeemed ?? 0} used · {data.codes?.available ?? 0} available
             </span>
+            <button className="btn ghost small" onClick={toggleCodeRequired} disabled={busy}>
+              {data.require_voting_code ? 'Make codes optional' : 'Require codes'}
+            </button>
           </div>
         </div>
 
