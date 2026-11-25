@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
 import { normalizePhone, isValidPhone } from '../lib/phone.js'
+import { START_REFUSALS, isAccountBallot } from '../lib/ballotMessages.js'
 
 const STORE_KEY = 'ypm-awards-ballot-v1'
 const ANNOUNCE = '19 December'
@@ -40,7 +41,7 @@ function initials(name) {
 }
 
 export default function Vote() {
-  const [view, setView] = useState('loading') // loading | closed | start | voting | review | done | voted
+  const [view, setView] = useState('loading') // loading | closed | start | voting | review | done | voted | account
   const [votingOpen, setVotingOpen] = useState(true)
   const [ballotId, setBallotId] = useState(null)
   const [picks, setPicks] = useState({}) // { categoryId: nomineeName }
@@ -55,6 +56,7 @@ export default function Vote() {
   const [error, setError] = useState('')
   const [justPicked, setJustPicked] = useState(null)
   const advanceTimer = useRef(null)
+  const accountBallot = useRef(false) // a youth leader linked this ballot to a voter account
 
   // Boot: check whether voting is open, then resume any ballot on this device.
   useEffect(() => {
@@ -154,6 +156,9 @@ export default function Vote() {
         )
       case 'rate_limited':
         return setError('Too many attempts. Please wait 15 minutes and try again.')
+      case 'registered_voter':
+      case 'registration_required':
+        return setError(START_REFUSALS[data.status])
       default:
         return setError('Please check your name and phone number.')
     }
@@ -175,6 +180,12 @@ export default function Vote() {
       p_category_id: categoryId,
       p_nominee_name: nomineeName,
     })
+
+    if (isAccountBallot(data)) {
+      accountBallot.current = true
+      setView('account')
+      return false
+    }
 
     if (err || data?.status === 'error') {
       setUnsynced((u) => {
@@ -211,6 +222,7 @@ export default function Vote() {
     if (advanceTimer.current) clearTimeout(advanceTimer.current)
     advanceTimer.current = setTimeout(() => {
       setJustPicked(null)
+      if (accountBallot.current) return
       if (index + 1 >= BALLOT.length) setView('review')
       else setIndex(index + 1)
     }, 300)
@@ -226,6 +238,7 @@ export default function Vote() {
     for (const [categoryId, nomineeName] of Object.entries(unsynced)) {
       if (!(await syncVote(categoryId, nomineeName))) failed++
     }
+    if (accountBallot.current) return setBusy(false)
     if (failed > 0) {
       setBusy(false)
       return setError(
@@ -243,6 +256,10 @@ export default function Vote() {
     if (data?.status === 'closed') {
       setVotingOpen(false)
       return setView('closed')
+    }
+    if (isAccountBallot(data)) {
+      accountBallot.current = true
+      return setView('account')
     }
 
     persist({ completed: true })
@@ -281,6 +298,22 @@ export default function Vote() {
           <h1 className="display">You have already voted</h1>
           <p className="dim">
             This phone number has a completed ballot. Winners are announced on {ANNOUNCE}.
+          </p>
+        </div>
+      </Shell>
+    )
+  }
+
+  if (view === 'account') {
+    return (
+      <Shell>
+        <div className="card center">
+          <Crest />
+          <h1 className="display">Please see a youth leader</h1>
+          <p className="dim">
+            This phone number now has a registered voter account, and this ballot belongs to it.
+            The votes already saved are kept, but this ballot can’t be changed or submitted from
+            this page.
           </p>
         </div>
       </Shell>

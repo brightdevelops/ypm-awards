@@ -11,6 +11,7 @@ is one transaction: it applies fully or not at all.
 | `ballot-sync.sql` | **Generated** (`npm run ballot:sql`). Brings the database ballot in line with `categories.js`. Re-run after every ballot edit. | — |
 | `003_voter_accounts.sql` | Registered voter accounts, voter login codes (keyed hashes, key in Supabase Vault), in-person registration, one ballot per voter. **Registration is off by default.** | `003_voter_accounts.down.sql` |
 | `dev/simulated_verification.sql` | **Development only.** Simulated verification for testing self-registration. Refuses to install or run outside a project marked as development. | Dropped by 003's undo |
+| `dev/revoke-synthetic-test-credentials.md` | **Development only, not run yet.** Step-by-step SQL that revokes the synthetic test voters (`08155500xxx`), ends their sign-ins and closes their open registrations. Deletes nothing; every write checks the project is marked as development. | Not needed (revoked accounts stay revoked until migration 004 adds a restore) |
 
 Undo in reverse order: 003's undo, then 002's, then 001's.
 

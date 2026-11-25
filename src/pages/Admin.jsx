@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import ResultsTab from '../components/admin/ResultsTab.jsx'
 import CodesTab from '../components/admin/CodesTab.jsx'
 import ActivityTab from '../components/admin/ActivityTab.jsx'
+import { adminReply } from '../lib/rpcErrors.js'
 import '../admin.css'
 
 // One saved session per door, so signing in at /inventor doesn't sign out /admin.
@@ -13,9 +14,16 @@ const SESSION_STORE = `ypm-awards-admin-session${DOOR}`
 const EXPIRES_STORE = `${SESSION_STORE}:expires`
 const TAB_STORE = `ypm-awards-admin-tab${DOOR}`
 
+// Registered voters (Phase 3.4) is development-only. import.meta.env.DEV is
+// fixed at build time, so a production build contains neither the tab nor
+// its code, and no environment variable can switch it on there. The tab
+// also checks the database itself (see voterAccess in lib/voters.js).
+const VotersTab = import.meta.env.DEV ? lazy(() => import('../components/admin/VotersTab.jsx')) : null
+
 const TABS = [
   { id: 'results', label: 'Results' },
   { id: 'codes', label: 'Voting codes' },
+  ...(VotersTab ? [{ id: 'voters', label: 'Registered voters' }] : []),
   { id: 'activity', label: 'Activity' },
 ]
 
@@ -96,18 +104,15 @@ export default function Admin() {
   )
 
   // One place that turns an admin RPC into { kind: 'ok' | 'unauthorized' |
-  // 'unexpected' | 'network', res }. Never retries.
+  // 'unexpected' | 'network', res }. Never retries. A 'network' result
+  // carries missing: true when the database doesn't have that function.
   const adminRpc = useCallback(
     async (fn, args = {}) => {
       try {
         const { data: res, error: err } = await supabase.rpc(fn, { p_session: session, ...args })
-        if (err) return { kind: 'network' }
-        if (res?.status === 'unauthorized') {
-          signedOut('Your session has ended. Please sign in again.')
-          return { kind: 'unauthorized' }
-        }
-        if (res?.status !== 'ok') return { kind: 'unexpected', res }
-        return { kind: 'ok', res }
+        const reply = adminReply(res, err)
+        if (reply.kind === 'unauthorized') signedOut('Your session has ended. Please sign in again.')
+        return reply
       } catch {
         return { kind: 'network' }
       }
@@ -382,6 +387,11 @@ export default function Admin() {
           {tab === 'results' && <ResultsTab data={data} />}
           {tab === 'codes' && (
             <CodesTab data={data} adminRpc={adminRpc} reloadDashboard={load} />
+          )}
+          {tab === 'voters' && VotersTab && (
+            <Suspense fallback={<div className="card center dim">Loading…</div>}>
+              <VotersTab adminRpc={adminRpc} />
+            </Suspense>
           )}
           {tab === 'activity' && <ActivityTab />}
         </div>
