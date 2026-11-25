@@ -133,11 +133,14 @@ function votersFrom(result) {
 // only ever have one account, so the account is the evidence:
 //   still_waiting  the review is still in the queue: nothing was decided
 //   approved       an account made from this review exists (method
-//                  face_simulated, not self-made, same name and number)
+//                  face_simulated, not self-made, same name and number).
+//                  byMe: it was created under this admin's key. Only then
+//                  can the lost code be this admin's; otherwise another
+//                  admin approved it and has already handed the code over.
 //   not_approved   the review is gone and no such account exists: it was
 //                  rejected (by you or someone else)
 //   unknown        the check itself couldn't be completed
-export function reviewOutcome(review, reviewsResult, votersResult) {
+export function reviewOutcome(review, reviewsResult, votersResult, myLabel) {
   if (reviewsResult?.kind !== 'ok') return { outcome: 'unknown' }
   const waiting = (reviewsResult.res?.reviews || []).some((r) => r.id === review.id)
   if (waiting) return { outcome: 'still_waiting' }
@@ -150,19 +153,25 @@ export function reviewOutcome(review, reviewsResult, votersResult) {
       v.method === 'face_simulated' &&
       v.created_by !== 'self',
   )
-  return voter ? { outcome: 'approved', voter } : { outcome: 'not_approved' }
+  return voter
+    ? { outcome: 'approved', voter, byMe: Boolean(myLabel) && voter.created_by === myLabel }
+    : { outcome: 'not_approved' }
 }
 
 // After an in-person registration without a reply.
-//   created      an in-person account with this name and number exists
+//   created      an in-person account with this name and number exists,
+//                created under this admin's key
 //   not_created  no account for this number exists: trying again is safe
 //   other        the number has an account that isn't this registration
+//                (including one another admin registered at the same time)
 //   unknown      the check couldn't be completed
-export function inPersonOutcome(name, maskedPhone, votersResult) {
+export function inPersonOutcome(name, maskedPhone, votersResult, myLabel) {
   const voters = votersFrom(votersResult)
   if (!voters) return { outcome: 'unknown' }
   const forNumber = voters.filter((v) => v.phone === maskedPhone)
-  const voter = forNumber.find((v) => v.method === 'in_person' && sameName(v.full_name, name))
+  const voter = forNumber.find(
+    (v) => v.method === 'in_person' && sameName(v.full_name, name) && Boolean(myLabel) && v.created_by === myLabel,
+  )
   if (voter) return { outcome: 'created', voter }
   return forNumber.length ? { outcome: 'other', voter: forNumber[0] } : { outcome: 'not_created' }
 }

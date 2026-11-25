@@ -250,19 +250,21 @@ describe('in-person registration (no biometrics)', () => {
     const r = await after.api.registerInPerson('Test Lostreply', '08155500712')
     assert.equal(r.kind, 'network')
     const masked = maskLikeServer('08155500712')
-    const out = inPersonOutcome('Test Lostreply', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT))
+    const out = inPersonOutcome('Test Lostreply', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'leader')
     assert.equal(out.outcome, 'created')
+    // Seen from another admin's dashboard, it isn't theirs to reissue.
+    assert.equal(inPersonOutcome('Test Lostreply', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'inventor').outcome, 'other')
     assert.equal(after.rpc.calls.filter((f) => f === 'admin_register_voter').length, 1)
     assert.equal(await voterCount(after.db, '08155500712'), 1)
 
     const before = await setup({ lose: (fn) => (fn === 'admin_register_voter' ? 'before' : null) })
     await before.api.registerInPerson('Test Lostreply', '08155500712')
-    const out2 = inPersonOutcome('Test Lostreply', masked, await before.api.list(lastDigits(masked), 0, VERIFY_LIMIT))
+    const out2 = inPersonOutcome('Test Lostreply', masked, await before.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'leader')
     assert.equal(out2.outcome, 'not_created')
     assert.equal(await voterCount(before.db, '08155500712'), 0)
 
     // A different person on that number is reported as such, not as "created".
-    const other = inPersonOutcome('Somebody Else', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT))
+    const other = inPersonOutcome('Somebody Else', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'leader')
     assert.equal(other.outcome, 'other')
     assert.equal(inPersonOutcome('X', masked, { kind: 'network' }).outcome, 'unknown')
   })
@@ -354,8 +356,8 @@ describe('reviews', () => {
   })
 
   it('a review missing from the queue is never assumed to be approved', async () => {
-    const check = async (api, review) =>
-      reviewOutcome(review, await api.reviews(), await api.list(lastDigits(review.phone), 0, VERIFY_LIMIT))
+    const check = async (api, review, me = 'leader') =>
+      reviewOutcome(review, await api.reviews(), await api.list(lastDigits(review.phone), 0, VERIFY_LIMIT), me)
 
     // Lost reply, but the server approved it: confirmed by the account.
     const s1 = await setup({ lose: (fn) => (fn === 'admin_resolve_review' ? 'after' : null) })
@@ -364,6 +366,7 @@ describe('reviews', () => {
     const o1 = await check(s1.api, r1)
     assert.equal(o1.outcome, 'approved')
     assert.equal(o1.voter.full_name, 'Test Lostapprove')
+    assert.equal(o1.byMe, true)
     // ...and the recommended reissue works.
     const re = await s1.api.reissue(o1.voter.id)
     assert.equal((await call(s1.db, 'voter_login', { p_code: re.res.voter_code })).status, 'ok')
@@ -387,6 +390,22 @@ describe('reviews', () => {
     const inPerson = await s3.api.registerInPerson('Test Otheradmin', '08155500735')
     assert.equal(inPerson.kind, 'ok')
     assert.equal((await check(s3.api, r3)).outcome, 'not_approved')
+
+    // Gone because ANOTHER admin approved it: approved, but not this admin's
+    // code to reissue (that would cancel the code already handed over).
+    const s4 = await setup()
+    const { review: r4 } = await reviewFor(s4.db, s4.session, 'Test Twoadmins', '08155500737')
+    const otherAdmin = await login(s4.db, INVENTOR_KEY)
+    const theirs = await call(s4.db, 'admin_resolve_review', { p_session: otherAdmin, p_registration_id: r4.id, p_decision: 'approve' })
+    assert.equal(theirs.status, 'ok')
+    const mine = await s4.api.resolveReview(r4.id, 'approve')
+    assert.equal(mine.kind, 'unexpected')
+    const o4 = await check(s4.api, r4)
+    assert.equal(o4.outcome, 'approved')
+    assert.equal(o4.byMe, false)
+    assert.equal(o4.voter.created_by, 'inventor')
+    assert.equal((await check(s4.api, r4, 'inventor')).byMe, true)
+    assert.equal((await check(s4.api, r4, undefined)).byMe, false)
 
     // The check itself failing is "unknown", never "approved".
     assert.equal(reviewOutcome(r3, { kind: 'network' }, { kind: 'ok', res: { voters: [] } }).outcome, 'unknown')
@@ -466,6 +485,12 @@ describe('the tab keeps codes and numbers to itself', () => {
     for (const f of ['src/App.jsx', 'src/pages/Vote.jsx', 'src/components/admin/CodesTab.jsx']) {
       assert.ok(!/VotersTab|lib\/voters/.test(readFileSync(root(f), 'utf8')), f)
     }
+  })
+
+  it('offers a reissue after a lost approval only when it was this admin’s own', () => {
+    const dialogs = files[2][1]
+    assert.match(dialogs, /setMine\(approve && r\.kind === 'network' && out\.byMe === true\)/)
+    assert.match(dialogs, /\{step === 'approved' && mine && \(/)
   })
 
   it('warns that revoking can’t be undone from the dashboard', () => {

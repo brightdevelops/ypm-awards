@@ -24,7 +24,7 @@ import {
 } from './VoterDialogs.jsx'
 import './voters.css'
 
-export default function VotersTab({ adminRpc }) {
+export default function VotersTab({ adminRpc, adminLabel }) {
   const api = useMemo(() => createVoterAdmin(adminRpc), [adminRpc])
   const [stats, setStats] = useState(null) // the adminRpc result of admin_voter_stats
   const [dialog, setDialog] = useState(null)
@@ -179,6 +179,7 @@ export default function VotersTab({ adminRpc }) {
       {dialog?.type === 'register' && (
         <RegisterInPersonDialog
           api={api}
+          adminLabel={adminLabel}
           onDone={done}
           onClose={() => done(null)}
           onReissue={(voter) => setDialog({ type: 'reissue', voter })}
@@ -189,6 +190,7 @@ export default function VotersTab({ adminRpc }) {
           review={dialog.review}
           decision={dialog.decision}
           api={api}
+          adminLabel={adminLabel}
           onDone={done}
           onClose={() => setDialog(null)}
           onReissue={(voter) => setDialog({ type: 'reissue', voter })}

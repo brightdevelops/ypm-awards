@@ -299,7 +299,7 @@ export function RevokeVoterDialog({ voter, api, onDone, onClose }) {
 
 // ---------- register in person ----------
 
-export function RegisterInPersonDialog({ api, onDone, onClose, onReissue }) {
+export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onReissue }) {
   const [busy, run] = useOneAtATime()
   const [step, setStep] = useState('form') // form | link | code | created | other | unknown
   const [name, setName] = useState('')
@@ -343,7 +343,7 @@ export function RegisterInPersonDialog({ api, onDone, onClose, onReissue }) {
         return setError('The server refused this. Check the name and number. Nothing was created.')
       }
       // No reply: find out whether the account exists before anything else.
-      const out = inPersonOutcome(name, masked, await api.list(lastDigits(masked), 0, VERIFY_LIMIT))
+      const out = inPersonOutcome(name, masked, await api.list(lastDigits(masked), 0, VERIFY_LIMIT), adminLabel)
       if (out.outcome === 'not_created') {
         setStep('form')
         return setError('The connection dropped, and no account was created. You can try again.')
@@ -491,12 +491,15 @@ export function RegisterInPersonDialog({ api, onDone, onClose, onReissue }) {
 
 // ---------- review decision ----------
 
-export function ResolveReviewDialog({ review, decision, api, onDone, onClose, onReissue }) {
+export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone, onClose, onReissue }) {
   const [busy, run] = useOneAtATime()
   const [step, setStep] = useState('confirm') // confirm | code | approved | rejected | unknown
   const [checked, setChecked] = useState(decision === 'reject')
   const [code, setCode] = useState('')
   const [found, setFound] = useState(null)
+  // Reissue is offered only if the lost reply was ours AND the account was
+  // made under our key: otherwise another admin has the code.
+  const [mine, setMine] = useState(false)
   const [error, setError] = useState('')
   const approve = decision === 'approve'
 
@@ -510,7 +513,7 @@ export function ResolveReviewDialog({ review, decision, api, onDone, onClose, on
       api.list(lastDigits(review.phone), 0, VERIFY_LIMIT),
     ])
     if (reviews.kind === 'unauthorized' || voters.kind === 'unauthorized') return null
-    return reviewOutcome(review, reviews, voters)
+    return reviewOutcome(review, reviews, voters, adminLabel)
   }
 
   async function resolve() {
@@ -542,6 +545,7 @@ export function ResolveReviewDialog({ review, decision, api, onDone, onClose, on
         )
       }
       setFound(out.voter ?? null)
+      setMine(approve && r.kind === 'network' && out.byMe === true)
       setStep(out.outcome === 'approved' ? 'approved' : out.outcome === 'not_approved' ? 'rejected' : 'unknown')
     })
   }
@@ -574,9 +578,9 @@ export function ResolveReviewDialog({ review, decision, api, onDone, onClose, on
               This registration <strong>was approved</strong>: an account for {found.full_name}{' '}
               ({found.phone}) was created by {createdByLabel(found.created_by)} at{' '}
               {formatDateTime(found.created_at)}.{' '}
-              {approve
+              {mine
                 ? 'The code didn’t reach you and can’t be shown again. Issue a new one: their identity is checked again first.'
-                : 'Someone else approved it, so it wasn’t rejected.'}
+                : 'It was approved by someone else, who was shown the code. Don’t reissue it unless the voter confirms in person that they never received it.'}
             </p>
           )}
           {step === 'rejected' && (
@@ -597,7 +601,7 @@ export function ResolveReviewDialog({ review, decision, api, onDone, onClose, on
           <button type="button" className="btn ghost small" onClick={() => onDone(null)} data-autofocus>
             Close
           </button>
-          {step === 'approved' && approve && (
+          {step === 'approved' && mine && (
             <button type="button" className="btn primary small" onClick={() => onReissue(found)}>
               Reissue code
             </button>

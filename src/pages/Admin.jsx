@@ -390,7 +390,7 @@ export default function Admin() {
           )}
           {tab === 'voters' && VotersTab && (
             <Suspense fallback={<div className="card center dim">Loading…</div>}>
-              <VotersTab adminRpc={adminRpc} />
+              <VotersTab adminRpc={adminRpc} adminLabel={data.key_label} />
             </Suspense>
           )}
           {tab === 'activity' && <ActivityTab />}
