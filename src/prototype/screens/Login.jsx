@@ -1,50 +1,54 @@
 import { useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
-import { DEMO_RETURNING, DEMO_SUBMITTED, after, normalizeVoterCode } from '../simulator.js'
-
-const MAX_TRIES = 5
+import { looksLikeVotingCode, normalizeVoterCode } from '../simulator.js'
 
 // Returning voters sign in with their voter code. No face scan.
-export default function Login({ go, onReturning }) {
+export default function Login({ go, api, onSignedIn, message }) {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [fails, setFails] = useState(0)
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
     if (busy) return
     setError('')
 
-    const raw = code.replace(/[^A-Za-z0-9]/g, '')
-    if (!raw) return setError('Enter your voter code.')
-    // An admin-issued voting code has 10 characters and no "YPM" prefix.
-    if (raw.length === 10 && !raw.toUpperCase().startsWith('YPM')) {
+    if (!code.trim()) return setError('Enter your voter code.')
+    if (looksLikeVotingCode(code)) {
       return setError(
         'That looks like a voting code from a youth leader, not a voter code. Use it on the voting page under “I have a voting code”.',
       )
     }
     const normal = normalizeVoterCode(code)
     if (!normal) return setError('Voter codes look like YPM-ABCD-2345-HJKM. Check it and try again.')
-    if (fails >= MAX_TRIES) return setError('Too many attempts. Please wait 15 minutes and try again.')
 
     setBusy(true)
-    after(900, () => {
-      setBusy(false)
-      if (normal === DEMO_RETURNING.code) return onReturning(DEMO_RETURNING)
-      if (normal === DEMO_SUBMITTED.code) return onReturning(DEMO_SUBMITTED)
-      const n = fails + 1
-      setFails(n)
-      setError(
-        n >= MAX_TRIES
-          ? 'Too many attempts. Please wait 15 minutes and try again.'
-          : 'We couldn’t find that voter code. Check it, or recover your code below.',
-      )
-    })
+    const r = await api.login(normal)
+    setBusy(false)
+
+    if (r.kind === 'failed') {
+      return setError('Couldn’t reach the server. Check your connection and try again.')
+    }
+    if (r.status === 'ok') {
+      setCode('')
+      return onSignedIn({
+        session: r.data.session,
+        expiresAt: r.data.expires_at,
+        firstName: r.data.first_name,
+        ballot: r.data.ballot,
+      })
+    }
+    if (r.status === 'rate_limited') return setError('Too many attempts. Please wait 15 minutes and try again.')
+    return setError('We couldn’t find that voter code. Check it, or recover your code below.')
   }
 
   return (
     <ScreenFrame title="Welcome back" lead="Sign in with your voter code to continue voting.">
+      {message && (
+        <p className="warnText small" role="status">
+          {message}
+        </p>
+      )}
       <form className="form" onSubmit={submit} noValidate>
         <label>
           <span>Voter code</span>

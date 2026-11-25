@@ -1,16 +1,14 @@
-// Phase 3.1 voter-registration prototype: simulated only. These tests check
-// that it stays that way, and that voter codes can't be confused with the
-// admin-issued voting codes from migration 001.
+// The development voter flow (/prototype/voter): code formats, and checks
+// that it stays development-only, camera-free and log-free.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  DEMO_RETURNING,
-  DEMO_SUBMITTED,
   VOTER_CODE_PATTERN,
-  demoVoterCode,
+  isTestPhone,
+  looksLikeVotingCode,
   maskPhone,
   normalizeVoterCode,
 } from '../../src/prototype/simulator.js'
@@ -30,6 +28,7 @@ describe('voter codes', () => {
     assert.equal(normalizeVoterCode('ypm-test-2345-hjkm'), 'YPM-TEST-2345-HJKM')
     assert.equal(normalizeVoterCode(' YPM TEST 2345 HJKM '), 'YPM-TEST-2345-HJKM')
     assert.equal(normalizeVoterCode('YPMTEST2345HJKM'), 'YPM-TEST-2345-HJKM')
+    assert.match('YPM-TEST-2345-HJKM', VOTER_CODE_PATTERN)
   })
 
   it('reject anything else, including the old 8-character format', () => {
@@ -41,21 +40,17 @@ describe('voter codes', () => {
     }
   })
 
-  it('demo codes are valid and generated codes match the pattern', () => {
-    assert.equal(normalizeVoterCode(DEMO_RETURNING.code), DEMO_RETURNING.code)
-    assert.equal(normalizeVoterCode(DEMO_SUBMITTED.code), DEMO_SUBMITTED.code)
-    for (let i = 0; i < 200; i++) assert.match(demoVoterCode(), VOTER_CODE_PATTERN)
-    assert.equal(demoVoterCode(() => 0), 'YPM-AAAA-AAAA-AAAA')
+  it('recognise an admin voting code, so the screen can redirect', () => {
+    assert.equal(looksLikeVotingCode('K7MQP-3XZRA'), true)
+    assert.equal(looksLikeVotingCode('YPM-TEST-2345-HJKM'), false)
   })
 
   it('the browser and the database agree on the format', async () => {
     const db = await freshDb()
     const rows = (await db.query(`select ypm_private.new_voter_code() c from generate_series(1, 200)`)).rows
     for (const { c } of rows) assert.equal(normalizeVoterCode(c), c)
-    for (const code of [DEMO_RETURNING.code, demoVoterCode()]) {
-      const r = await db.query(`select ypm_private.normalize_voter_code($1) n`, [code])
-      assert.equal(r.rows[0].n, code.replace(/-/g, ''))
-    }
+    const r = await db.query(`select ypm_private.normalize_voter_code($1) n`, ['YPM-TEST-2345-HJKM'])
+    assert.equal(r.rows[0].n, 'YPMTEST2345HJKM')
   })
 
   it('never overlap with real voting codes, in either direction', async () => {
@@ -63,34 +58,49 @@ describe('voter codes', () => {
     const s = await login(db)
     const votingCodes = await issue(db, s, { count: 100, note: 'separation test' })
     for (const c of votingCodes) assert.equal(normalizeVoterCode(c.code), null, c.code)
-
-    // The voting system refuses a voter code as a voting code.
     const r = await call(db, 'begin_ballot', {
-      p_name: 'Test Person',
-      p_phone: '08155550000',
-      p_code: demoVoterCode(),
+      p_name: 'Test Person', p_phone: '08155500900', p_code: 'YPM-TEST-2345-HJKM',
     })
     assert.equal(r.status, 'invalid_code')
   })
 
-  it('masks phone numbers', () => {
-    assert.equal(maskPhone('08012345678'), '•••• 5678')
-    assert.equal(maskPhone(''), '')
+  it('accepts only synthetic test numbers, and masks numbers', () => {
+    assert.equal(isTestPhone('08155500001'), true)
+    assert.equal(isTestPhone('08155500999'), true)
+    assert.equal(isTestPhone('08155501000'), false)
+    assert.equal(isTestPhone('08031234567'), false)
+    assert.equal(maskPhone('08155500012'), '•••• 0012')
   })
 })
 
-describe('the prototype collects and sends nothing', () => {
+describe('the development voter flow collects nothing it shouldn’t', () => {
   const files = filesUnder(root('src/prototype'))
+  const rel = (f) => f.slice(root('').length).replace(/\\/g, '/')
 
-  it('has no camera, network, database, storage or logging calls', () => {
+  it('has no camera, raw network, storage of codes, or logging', () => {
     const forbidden = [
       /getUserMedia/, /mediaDevices/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/,
-      /sendBeacon/, /supabaseClient/, /@supabase/, /\.rpc\(/, /localStorage/, /sessionStorage/, /indexedDB/, /console\./,
+      /sendBeacon/, /localStorage/, /indexedDB/, /console\./,
     ]
-    assert.ok(files.length >= 10)
+    assert.ok(files.length >= 15)
     for (const f of files) {
       const src = readFileSync(f, 'utf8')
-      for (const re of forbidden) assert.ok(!re.test(src), `${f} matches ${re}`)
+      for (const re of forbidden) assert.ok(!re.test(src), `${rel(f)} matches ${re}`)
+    }
+  })
+
+  it('talks to Supabase only through connection.js', () => {
+    for (const f of files) {
+      if (rel(f) === 'src/prototype/connection.js') continue
+      const src = readFileSync(f, 'utf8')
+      assert.ok(!/supabaseClient|@supabase|supabase\.rpc/.test(src), `${rel(f)} uses Supabase directly`)
+    }
+  })
+
+  it('uses sessionStorage only in voterSession.js', () => {
+    for (const f of files) {
+      if (rel(f) === 'src/prototype/voterSession.js') continue
+      assert.ok(!/sessionStorage/.test(readFileSync(f, 'utf8')), `${rel(f)} uses sessionStorage`)
     }
   })
 
@@ -98,18 +108,21 @@ describe('the prototype collects and sends nothing', () => {
     const app = readFileSync(root('src/App.jsx'), 'utf8')
     assert.match(app, /const VoterPrototype = import\.meta\.env\.DEV\s*\?\s*lazy\(/)
     assert.match(app, /VoterPrototype && path === '\/prototype\/voter'/)
-    // Nothing else imports it.
-    for (const f of filesUnder(root('src')).filter((p) => !p.includes(`${join('src', 'prototype')}`))) {
+    for (const f of filesUnder(root('src')).filter((p) => !p.includes(join('src', 'prototype')))) {
       if (f.endsWith('App.jsx')) continue
       assert.ok(!/prototype\//.test(readFileSync(f, 'utf8')), `${f} imports the prototype`)
     }
   })
 
-  it('labels itself as a prototype with simulated results', () => {
+  it('labels simulated results as simulated, not biometric', () => {
     const main = readFileSync(root('src/prototype/VoterPrototype.jsx'), 'utf8')
-    assert.match(main, /Prototype/)
-    assert.match(main, /Simulated results/)
-    const camera = readFileSync(root('src/prototype/screens/Camera.jsx'), 'utf8')
-    assert.match(camera, /Simulated camera · nothing recorded/)
+    assert.match(main, /Simulated verification · No camera is used/)
+    assert.match(readFileSync(root('src/prototype/screens/Camera.jsx'), 'utf8'), /Simulated camera · nothing recorded/)
+    assert.match(
+      readFileSync(root('src/prototype/screens/Duplicate.jsx'), 'utf8'),
+      /not the\s+result of any face comparison/,
+    )
+    assert.match(readFileSync(root('src/prototype/TesterPanel.jsx'), 'utf8'), /not a\s+biometric comparison/)
+    assert.match(readFileSync(root('src/prototype/simulator.js'), 'utf8'), /simulated, not biometric/)
   })
 })

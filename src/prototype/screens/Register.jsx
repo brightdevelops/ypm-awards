@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
 import { isValidPhone, normalizePhone } from '../../lib/phone.js'
+import { TEST_PHONE_RANGE, isTestPhone } from '../simulator.js'
 
 export default function Register({ go, details, onSubmit }) {
   const [name, setName] = useState(details.name)
@@ -11,8 +12,12 @@ export default function Register({ go, details, onSubmit }) {
     e.preventDefault()
     setError('')
     if (name.trim().split(/\s+/).length < 2) return setError('Enter your first and last name.')
-    if (!isValidPhone(phone)) return setError('Enter a valid phone number, e.g. 08012345678.')
-    onSubmit({ name: name.trim(), phone: normalizePhone(phone) })
+    if (!isValidPhone(phone)) return setError('Enter a valid phone number, e.g. 08155500001.')
+    const normal = normalizePhone(phone)
+    if (!isTestPhone(normal)) {
+      return setError(`Development testing uses synthetic numbers only: ${TEST_PHONE_RANGE}.`)
+    }
+    onSubmit({ name: name.trim(), phone: normal })
   }
 
   return (
@@ -27,7 +32,7 @@ export default function Register({ go, details, onSubmit }) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             autoComplete="off"
-            placeholder="e.g. Chioma Test"
+            placeholder="e.g. Test Voter One"
           />
         </label>
         <label>
@@ -38,9 +43,13 @@ export default function Register({ go, details, onSubmit }) {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             autoComplete="off"
-            placeholder="08012345678"
+            placeholder="08155500001"
+            aria-describedby="reg-phone-help"
           />
         </label>
+        <p id="reg-phone-help" className="fineprint">
+          Development: synthetic test numbers only ({TEST_PHONE_RANGE}).
+        </p>
         {error && (
           <p className="error" role="alert">
             {error}

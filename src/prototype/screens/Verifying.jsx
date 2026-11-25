@@ -1,59 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
 import { VERIFY_STEPS, after } from '../simulator.js'
 
-// SIMULATED checks: each step is a timer. The outcome is whatever was picked
-// in the prototype controls.
-const FAIL_AT = { liveness_failed: 1, network: 2 }
-
-export default function Verifying({ go, outcome, onResult }) {
+// Shows progress while `task` (simulate + status check on the server) runs,
+// then hands its result to onResult. The steps are display only: the
+// outcome comes from the server's registration status.
+export default function Verifying({ task, onResult }) {
   const [step, setStep] = useState(0)
-  const [failed, setFailed] = useState(null)
+  const [result, setResult] = useState(null)
+  const started = useRef(false)
 
   useEffect(() => {
-    if (failed) return
-    if (FAIL_AT[outcome] === step) {
-      return after(1300, () => setFailed(outcome))
-    }
-    if (step >= VERIFY_STEPS.length) {
-      return after(400, () => onResult(outcome === 'duplicate' ? 'duplicate' : 'approved'))
-    }
-    return after(1300, () => setStep((s) => s + 1))
-  }, [step, failed, outcome, onResult])
+    if (started.current) return
+    started.current = true
+    task().then(setResult)
+  }, [task])
 
-  if (failed === 'liveness_failed') {
-    return (
-      <ScreenFrame title="We couldn’t complete the face check">
-        <p className="dim">
-          This usually means the light was too dim or the face moved out of the oval. Nothing
-          has been saved.
-        </p>
-        <button type="button" className="btn primary" onClick={() => go('camera')}>
-          Try again
-        </button>
-        <button type="button" className="btn ghost protoAlt" onClick={() => go('alternative')}>
-          Register another way
-        </button>
-      </ScreenFrame>
-    )
-  }
-
-  if (failed === 'network') {
-    return (
-      <ScreenFrame title="Connection lost">
-        <p className="dim">
-          We couldn’t confirm whether your registration went through. If you try again and see
-          “We may already have you registered”, choose <strong>Recover my voter code</strong>.
-        </p>
-        <button type="button" className="btn primary" onClick={() => go('camera')}>
-          Try again
-        </button>
-        <button type="button" className="btn ghost protoAlt" onClick={() => go('recovery')}>
-          Recover my voter code
-        </button>
-      </ScreenFrame>
-    )
-  }
+  useEffect(() => {
+    if (step < VERIFY_STEPS.length) return after(1100, () => setStep((s) => s + 1))
+    if (result) return after(300, () => onResult(result))
+  }, [step, result, onResult])
 
   return (
     <ScreenFrame title="Checking your registration" lead="This takes a few seconds. Please keep this page open.">
@@ -75,6 +41,7 @@ export default function Verifying({ go, outcome, onResult }) {
           )
         })}
       </ol>
+      <p className="fineprint">Development: the result is simulated. No face comparison takes place.</p>
     </ScreenFrame>
   )
 }

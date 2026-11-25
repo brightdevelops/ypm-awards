@@ -4,16 +4,24 @@ import ScreenFrame from '../ScreenFrame.jsx'
 // DRAFT wording for the prototype. It has not been reviewed against the
 // NDPA 2023 / GAID 2025, no DPIA has been done, and the retention period is
 // a proposal. It must be replaced by approved text before any real use.
-export default function Consent({ go }) {
+// onAgree() starts the registration on the server and moves on; if it
+// can't, it returns a message to show here.
+export default function Consent({ go, onAgree }) {
   const [agree, setAgree] = useState(false)
   const [age, setAge] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
+    if (busy) return
+    setError('')
     if (!age) return setError('Tell us whether you are 18 or older.')
     if (!agree) return setError('Tick the box to agree, or choose another way to register.')
-    go('camera')
+    setBusy(true)
+    const message = await onAgree()
+    setBusy(false)
+    if (message) setError(message)
   }
 
   return (
@@ -85,8 +93,8 @@ export default function Consent({ go }) {
         )}
 
         {age !== 'minor' && (
-          <button className="btn primary" disabled={age === 'adult' && !agree}>
-            I agree, continue
+          <button className="btn primary" disabled={busy || (age === 'adult' && !agree)}>
+            {busy ? 'Starting…' : 'I agree, continue'}
           </button>
         )}
       </form>

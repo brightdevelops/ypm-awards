@@ -2,11 +2,10 @@ import { useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
 
 // Show-once voter code. It lives only in memory and is cleared as soon as
-// this screen is left. Fictional in the prototype.
-export default function Success({ go, details, code }) {
+// this screen is left. Only a keyed hash of it exists on the server.
+export default function Success({ firstName, code, onContinue }) {
   const [saved, setSaved] = useState(false)
   const [copyMsg, setCopyMsg] = useState('')
-  const first = details.name.split(/\s+/)[0] || 'there'
 
   if (!code) return null
 
@@ -20,13 +19,13 @@ export default function Success({ go, details, code }) {
   }
 
   return (
-    <ScreenFrame title={`You’re registered, ${first}`}>
+    <ScreenFrame title={`You’re registered, ${firstName || 'there'}`}>
       <p className="dim">This is your voter code. You’ll use it to sign in, instead of a face scan.</p>
 
       <div className="voterCodeBox">
         <span className="srOnly">Your voter code is </span>
         <span className="voterCode">{code}</span>
-        <span className="vcDemo">Fictional code (prototype)</span>
+        <span className="vcDemo">Development test registration</span>
       </div>
 
       <div className="callout warnBox" role="note">
@@ -48,10 +47,9 @@ export default function Success({ go, details, code }) {
         <span>I’ve saved my voter code</span>
       </label>
 
-      <button type="button" className="btn primary" disabled={!saved} onClick={() => go('login')}>
+      <button type="button" className="btn primary" disabled={!saved} onClick={onContinue}>
         Continue to my ballot
       </button>
-      <p className="fineprint">Prototype: the ballot would open here. The code is now cleared.</p>
     </ScreenFrame>
   )
 }

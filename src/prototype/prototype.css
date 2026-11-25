@@ -525,6 +525,85 @@
   color: var(--gold-bright);
 }
 
+.callout.infoBox {
+  padding: 12px 14px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.protoNext {
+  margin-top: 0 !important;
+}
+
+.protoShell .navRow {
+  margin-top: 4px;
+}
+
+.testerForm {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.testerForm label {
+  display: grid;
+  gap: 4px;
+}
+
+.testerForm input {
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  font-size: 16px;
+}
+
+.testerReviews ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.testerReviews li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.testerReviews .linkBtn,
+.protoPanel p .linkBtn {
+  padding: 0 4px;
+  font-size: 13px;
+}
+
+.testerHandover {
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+
+.testerHandover code {
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: var(--gold-bright);
+  user-select: all;
+}
+
+.protoPanel {
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .vfScan,
   .spinner {
