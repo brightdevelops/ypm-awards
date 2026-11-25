@@ -66,7 +66,7 @@ describe('003 defaults and existing data', () => {
   })
 
   it('starts with registration off, no provider, and marked as production', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     const [s] = await sql(db, `select registration_mode, verification_provider from settings`)
     assert.deepEqual(s, { registration_mode: 'off', verification_provider: 'none' })
     assert.equal((await sql(db, `select environment from ypm_private.deployment`))[0].environment, 'production')
@@ -80,7 +80,7 @@ describe('003 defaults and existing data', () => {
   })
 
   it('keeps the browser out of every new table and private function', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     await db.exec('set role anon')
     try {
       for (const t of ['voters', 'voter_registrations', 'voter_sessions']) {
@@ -104,7 +104,7 @@ describe('003 defaults and existing data', () => {
 describe('voter codes and their hashes', () => {
   let db, admin
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
   })
 
@@ -155,7 +155,7 @@ describe('voter codes and their hashes', () => {
   })
 
   it('fails closed if the key is missing', async () => {
-    const db2 = await freshDb()
+    const db2 = await freshDb({ migrate: '003' })
     const a = await login(db2)
     await sql(db2, `delete from vault.secrets`)
     await assert.rejects(
@@ -178,7 +178,7 @@ describe('voter codes and their hashes', () => {
 
 describe('the simulated provider is development-only', () => {
   it('cannot be switched on, or installed, in a production project', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     await assert.rejects(
       sql(db, `update settings set verification_provider = 'simulated' where id = 1`),
       /only allowed in a development project/,
@@ -192,7 +192,7 @@ describe('the simulated provider is development-only', () => {
   })
 
   it('needs an admin session, and stops working outside development', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     const admin = await login(db)
     await devMode(db)
     const s = await start(db, 'Sim Test', '08150000020')
@@ -210,7 +210,7 @@ describe('the simulated provider is development-only', () => {
   })
 
   it('without a provider, self-registration is unavailable', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     await sql(db, `update settings set registration_mode = 'optional' where id = 1`)
     assert.equal((await start(db, 'Kemi Test', '08150000021')).status, 'verification_unavailable')
   })
@@ -219,7 +219,7 @@ describe('the simulated provider is development-only', () => {
 describe('self-registration (simulated)', () => {
   let db, admin
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
     await devMode(db)
   })
@@ -332,7 +332,7 @@ describe('self-registration (simulated)', () => {
 describe('voter sign-in, sessions, replacement and revocation', () => {
   let db, admin
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
   })
 
@@ -408,7 +408,7 @@ describe('voter sign-in, sessions, replacement and revocation', () => {
 describe('one ballot per registered voter', () => {
   let db, admin
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
   })
 
@@ -462,7 +462,7 @@ describe('one ballot per registered voter', () => {
 describe('the old voting functions can’t get around registration', () => {
   let db, admin, voter, voterBallotId
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
     voter = await registerInPerson(db, admin, 'Bypass Test', '08150000060')
     const s = (await voterLogin(db, voter.voter_code)).session
@@ -546,7 +546,7 @@ describe('the old voting functions can’t get around registration', () => {
 describe('admin registration, in person', () => {
   let db, admin
   before(async () => {
-    db = await freshDb()
+    db = await freshDb({ migrate: '003' })
     admin = await login(db)
   })
 
@@ -635,7 +635,7 @@ describe('admin registration, in person', () => {
 
 describe('rolling 003 back', () => {
   it('restores the original functions and keeps every ballot and vote', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     const admin = await login(db)
     await devMode(db)
     const v = await registerSelf(db, admin, 'Rollback Test', '08150000080')
@@ -678,7 +678,7 @@ describe('rolling 003 back', () => {
   })
 
   it('re-running 001 or 002 removes the protections, and re-running 003 restores them', async () => {
-    const db = await freshDb()
+    const db = await freshDb({ migrate: '003' })
     const admin = await login(db)
     await registerInPerson(db, admin, 'Rerun Test', '08150000090')
     await db.exec(MIGRATION_SQL)

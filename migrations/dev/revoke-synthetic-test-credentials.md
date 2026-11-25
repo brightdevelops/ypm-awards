@@ -159,5 +159,6 @@ Expected: `0`. Don't run any other statement from this file in Production.
 ---
 
 After this, testing again simply means registering new synthetic numbers.
-Revoked numbers stay registered (there's no restore yet; see migration 004,
-deferred), so use numbers that haven't been used before.
+Revoked numbers stay registered, so use numbers that haven't been used
+before. (With migration 004 an admin can restore a revoked account, which
+always issues a new code; the revoked codes never work again.)

@@ -14,6 +14,20 @@ export const BALLOT_SYNC_SQL = readFileSync(root('migrations/ballot-sync.sql'), 
 export const VOTER_MIGRATION_SQL = readFileSync(root('migrations/003_voter_accounts.sql'), 'utf8')
 export const VOTER_DOWN_SQL = readFileSync(root('migrations/003_voter_accounts.down.sql'), 'utf8')
 export const DEV_SIM_SQL = readFileSync(root('migrations/dev/simulated_verification.sql'), 'utf8')
+export const SAFEGUARDS_SQL = readFileSync(root('migrations/004_voter_safeguards.sql'), 'utf8')
+export const SAFEGUARDS_DOWN_SQL = readFileSync(root('migrations/004_voter_safeguards.down.sql'), 'utf8')
+
+// Supabase's API roles, with Supabase's default grants: anon and
+// authenticated get every privilege on new objects in \`public\`, so RLS
+// and explicit revokes are what actually keep them out.
+export const ROLES_SQL = `
+  create role anon nologin;
+  create role authenticated nologin;
+  grant usage on schema public to anon, authenticated;
+  alter default privileges in schema public grant all on tables    to anon, authenticated;
+  alter default privileges in schema public grant all on sequences to anon, authenticated;
+  alter default privileges in schema public grant all on functions to anon, authenticated;
+`
 
 // A stand-in for Supabase Vault (the supabase_vault extension): same names,
 // no encryption. Real Vault encrypts secrets with a key held outside the
@@ -48,20 +62,11 @@ export const LEGACY = {
 
 // migrate: false = production as it is today; '001' = after 001 only;
 // '002' = 001, 002 and ballot-sync.sql (before voter accounts);
-// true = every migration (including 003) plus the current ballot-sync.sql.
+// '003' = through 003 (voter accounts, before the 004 safeguards);
+// true = every migration (through 004) plus the current ballot-sync.sql.
 export async function freshDb({ migrate = true } = {}) {
   const db = new PGlite()
-  // Supabase's API roles, with Supabase's default grants: anon and
-  // authenticated get every privilege on new objects in `public`, so RLS
-  // and explicit revokes are what actually keep them out.
-  await db.exec(`
-    create role anon nologin;
-    create role authenticated nologin;
-    grant usage on schema public to anon, authenticated;
-    alter default privileges in schema public grant all on tables    to anon, authenticated;
-    alter default privileges in schema public grant all on sequences to anon, authenticated;
-    alter default privileges in schema public grant all on functions to anon, authenticated;
-  `)
+  await db.exec(ROLES_SQL)
   await db.exec(SETUP_SQL)
 
   // Seed one submitted and one unfinished ballot through the OLD functions.
@@ -80,11 +85,12 @@ export async function freshDb({ migrate = true } = {}) {
 
   await db.exec(VAULT_STUB_SQL)
   if (migrate) await db.exec(MIGRATION_SQL)
-  if (migrate === true || migrate === '002') {
+  if (migrate === true || migrate === '002' || migrate === '003') {
     await db.exec(BALLOT_MIGRATION_SQL)
     await db.exec(BALLOT_SYNC_SQL)
   }
-  if (migrate === true) await db.exec(VOTER_MIGRATION_SQL)
+  if (migrate === true || migrate === '003') await db.exec(VOTER_MIGRATION_SQL)
+  if (migrate === true) await db.exec(SAFEGUARDS_SQL)
   return db
 }
 

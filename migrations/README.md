@@ -10,15 +10,19 @@ is one transaction: it applies fully or not at all.
 | `002_ballot_validation.sql` | Loads the ballot into the database; `save_vote` only accepts real nominees in their own category | `002_ballot_validation.down.sql` |
 | `ballot-sync.sql` | **Generated** (`npm run ballot:sql`). Brings the database ballot in line with `categories.js`. Re-run after every ballot edit. | — |
 | `003_voter_accounts.sql` | Registered voter accounts, voter login codes (keyed hashes, key in Supabase Vault), in-person registration, one ballot per voter. **Registration is off by default.** | `003_voter_accounts.down.sql` |
+| `004_voter_safeguards.sql` | Voter accounts **development only, enforced by the database**; restoring revoked voters with a new code (old codes retired for good); linking a ballot when approving a review; consent records with version tracking; `erase_voter` for deletion. **Not applied anywhere yet.** | `004_voter_safeguards.down.sql` |
 | `dev/simulated_verification.sql` | **Development only.** Simulated verification for testing self-registration. Refuses to install or run outside a project marked as development. | Dropped by 003's undo |
-| `dev/revoke-synthetic-test-credentials.md` | **Development only, not run yet.** Step-by-step SQL that revokes the synthetic test voters (`08155500xxx`), ends their sign-ins and closes their open registrations. Deletes nothing; every write checks the project is marked as development. | Not needed (revoked accounts stay revoked until migration 004 adds a restore) |
+| `dev/revoke-synthetic-test-credentials.md` | **Development only, not run yet.** Step-by-step SQL that revokes the synthetic test voters (`08155500xxx`), ends their sign-ins and closes their open registrations. Deletes nothing; every write checks the project is marked as development. | Not needed (with 004, a revoked account can be restored with a new code) |
 
-Undo in reverse order: 003's undo, then 002's, then 001's.
+Undo in reverse order: 004's undo, then 003's, then 002's, then 001's.
+003's undo refuses to run while 004 is installed.
 
 **After 003, re-run 003 whenever 001 or 002 is re-run.** 003 moves the
 original `begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private`
 and puts protective wrappers in their place. Re-running 001 or 002 replaces
 the wrappers with the unprotected versions until 003 is run again.
+Likewise **re-run 004 whenever 003 is re-run**: 003 would put back its
+voter functions without 004's development-only switch.
 
 **Always run on the development project first**, and run `npm test` before
 either. Nothing in this repo runs migrations for you.
@@ -174,3 +178,115 @@ That's a fairness decision for the leaders, not a technical one.
   `update ypm_private.deployment set environment = 'development';`
   Production stays `production` (the default), where the simulator can't be
   switched on, installed or run.
+
+---
+
+## 004 — voter account safeguards
+
+### What it does
+
+- **Development only, enforced by the database.** Every voter-account
+  function (17 of them: registration, claim, sign-in, ballot, and the admin
+  voter functions) answers `{"status": "disabled"}` unless
+  `ypm_private.deployment.environment = 'development'`. A frontend setting
+  can't change that. Online registration can't be switched on outside
+  development, and a project can't be marked production again while
+  registration or simulated verification is on. 004 refuses to install on a
+  production-marked project that has either switched on.
+- **The originals can't be called directly.** The 003 functions move into
+  `ypm_private` (as `*_003`, unchanged, kept for the undo). Nothing in
+  `ypm_private` is executable by `anon` or `authenticated`, and those roles
+  have no access to the schema (tested function by function).
+- **Restore** (`admin_restore_voter`): only for revoked accounts, needs a
+  reason, always issues a **new** code (shown once). Every replaced code's
+  keyed hash goes into `ypm_private.retired_voter_codes`, and a retired code
+  can never be issued or used again.
+- **Ballot linking on approval** (`admin_resolve_review(..., p_link_existing_ballot)`):
+  without it the reply is `phone_has_ballot` with the ballot's state and how
+  many categories are answered; with it the ballot is attached under the
+  phone lock, votes untouched. One account per number and one ballot per
+  voter are enforced by locks and unique indexes.
+- **Consent records** (`public.voter_consents`, below). In-person
+  registration (`admin_register_voter`) now needs a current consent version
+  and `p_adult_confirmed => true`. **Under-18 registration is deferred**
+  until the youth leaders approve a non-biometric policy.
+- **Anonymous voting is untouched**: `begin_ballot`, `save_vote`,
+  `submit_ballot`, `voting_status`, voting codes and results behave exactly
+  as before (tested on a production-marked database, and installing 004
+  changes no ballot, vote or setting).
+
+### Consent records: what, who can see them, how long they're kept
+
+**Stored per account** (`public.voter_consents`): the notice version
+agreed to, how (`online` / `in_person`), whether adulthood was confirmed,
+`biometric = false` (enforced), when they agreed, who recorded it (`self` or
+the admin's key label), and whether it was recorded when the account was made
+or carried over by 004. **No names, numbers or free text**: those stay on the
+voter row and are not copied.
+
+**Notice versions** live in `ypm_private.consent_versions`. Draft versions
+(the development notice `draft-2026-11-dev`) are accepted only on a
+development project. A real notice must be added as a non-draft version, with
+the leaders' approval, before any real registration.
+
+**Nothing is invented.** Accounts made before 004 get a record only if a
+consent was actually captured at the time (online registrations). In-person
+accounts from 003 stay without one; `admin_voter_stats` reports how many
+accounts have no consent record.
+
+**Access.** Row level security is on and the API roles have no privileges:
+the browser can't read, add, change or delete consent records. Only the
+database owner (SQL editor) can read them. Admins see counts only.
+
+**Append-only.** Records can't be updated. They can't be deleted or
+truncated either, except inside `ypm_private.erase_voter`.
+
+**Retention and deletion (proposed; needs the youth leaders' approval).**
+
+| What | Kept until | Then |
+|---|---|---|
+| Voter account, its consent records, sessions, registrations | The election's results are final and any challenge period is over. **Proposed: 90 days after results are announced.** | Deleted with `ypm_private.erase_voter` for every account |
+| A person's account, on their request | Their request (after checking who they are, in person) | Deleted with `ypm_private.erase_voter` |
+| Ballots and votes | Not affected: an erased voter's ballot stays as an ordinary anonymous ballot | Per the election's own rules |
+| Retired code hashes | Until all voter accounts are erased | Delete the rows; they contain no personal data |
+| Audit log entries | As for the rest of the audit log | `voter_erased` entries hold no name or number |
+
+```sql
+-- Database owner only, SQL editor. One account:
+select ypm_private.erase_voter('<voter id>', 'reason, e.g. deletion request');
+```
+
+### Undoing 004
+
+1. **Export the consent records first** if they hold anything you need to
+   keep (the undo deletes them; the audit log keeps the consent version of
+   every in-person registration and every restore):
+   ```sql
+   select c.*, v.full_name from public.voter_consents c
+     join public.voters v on v.id = c.voter_id;
+   ```
+2. Run `004_voter_safeguards.down.sql` (one transaction).
+3. Check the 003 functions are back:
+   ```sql
+   select to_regprocedure('public.admin_resolve_review(text,uuid,text)') is not null as back,
+          to_regprocedure('public.admin_restore_voter(text,uuid,text)') is null as gone;
+   ```
+   Expect `true, true`.
+
+**Kept:** accounts (restored ones stay active with their new code), codes,
+registrations, sessions, ballots and votes. **Lost:** consent records and
+versions, the retired-code list, restore details on voter rows, and the
+development-only switch (voter functions work in any environment again, as
+in 003). The tests check that 004 followed by its undo leaves every function
+body, grant, trigger, column and row exactly as 003 had them.
+
+### Tests
+
+- `npm test` (sequential, PGlite): `tests/db/voter-safeguards.test.mjs`,
+  plus the simulated-browser tests in `tests/ui/dom/`.
+- `npm run test:concurrency` (**genuine** concurrency): starts a throwaway
+  PostgreSQL server from the installed programs (own temp folder, random
+  port, 127.0.0.1 only, deleted afterwards; never another server), holds N
+  requests at a barrier, checks they are all queued at once, releases them
+  together, and checks there is still exactly one account / ballot / valid
+  code. Skips if PostgreSQL's programs aren't installed (`YPM_PG_BIN`).

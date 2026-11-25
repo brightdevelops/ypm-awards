@@ -221,9 +221,16 @@ describe('the connected flow, end to end (simulated verification)', () => {
   it('the simulator needs a tester session and a development database', async () => {
     const s = await api.start('Test Voter Eight', '08155500008', true, CONSENT_VERSION)
     assert.equal((await api.simulate('not-a-session', s.data.registration_token, 'approved')).kind, 'unauthorized')
+    // 004: a project can't be marked production while registration is on...
+    await assert.rejects(sql(db, `update ypm_private.deployment set environment = 'production'`),
+      /Before marking this project as production/)
+    // ...so switch it off first, as the procedure says.
+    await sql(db, `update settings set registration_mode = 'off', verification_provider = 'none' where id = 1`)
     await sql(db, `update ypm_private.deployment set environment = 'production'`)
     assert.equal((await api.simulate(tester, s.data.registration_token, 'approved')).status, 'disabled')
+    assert.equal((await api.status(s.data.registration_token)).status, 'disabled')
     await sql(db, `update ypm_private.deployment set environment = 'development'`)
+    await sql(db, `update settings set verification_provider = 'simulated', registration_mode = 'optional' where id = 1`)
     assert.equal((await api.status(s.data.registration_token)).status, 'pending')
   })
 
