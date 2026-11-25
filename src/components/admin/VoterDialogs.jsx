@@ -24,10 +24,10 @@ import {
   voterStatusNow,
 } from '../../lib/voters.js'
 
-const NO_UNDO =
-  'There is no way to undo this from the dashboard yet. The number stays registered, so this ' +
-  'person can’t register again or vote on the voting page. Only a database administrator can ' +
-  'restore the account.'
+const RESTORE_NOTE =
+  'The number stays registered, so they can’t vote on the voting page or register again. ' +
+  'You can restore the account later from this list; restoring always issues a new code, and ' +
+  'the current code never works again.'
 
 // Guards against a second click while a request is out, on top of the
 // single-flight in lib/voters.js.
@@ -272,7 +272,7 @@ export function RevokeVoterDialog({ voter, api, onDone, onClose }) {
       </dl>
       <div className="callout warn">
         <p>Their code and signed-in devices stop working at once. Their ballot and votes are kept.</p>
-        <p><strong>{NO_UNDO}</strong></p>
+        <p><strong>{RESTORE_NOTE}</strong></p>
       </div>
       <form className="form dialogForm" onSubmit={(e) => { e.preventDefault(); if (matches) revoke() }}>
         <label>
@@ -299,14 +299,16 @@ export function RevokeVoterDialog({ voter, api, onDone, onClose }) {
 
 // ---------- register in person ----------
 
-export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onReissue }) {
+export function RegisterInPersonDialog({ api, adminLabel, consentVersion, onDone, onClose, onReissue }) {
   const [busy, run] = useOneAtATime()
   const [step, setStep] = useState('form') // form | link | code | created | other | unknown
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [checked, setChecked] = useState(false)
+  const [consented, setConsented] = useState(false)
+  const [adult, setAdult] = useState(false)
   const [linkChecked, setLinkChecked] = useState(false)
-  const [ballot, setBallot] = useState(null)
+  const [ballot, setBallot] = useState(null) // { state, answered }
   const [result, setResult] = useState(null) // { code, linked }
   const [found, setFound] = useState(null)
   const [error, setError] = useState('')
@@ -319,7 +321,7 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
   async function submit(link) {
     await run(async () => {
       setError('')
-      const r = await api.registerInPerson(name, canonical, link)
+      const r = await api.registerInPerson(name, canonical, consentVersion, adult, link)
       if (r.kind === 'unauthorized') return
       if (r.kind === 'ok') {
         setResult({ code: r.res.voter_code, linked: r.res.linked_ballot === true })
@@ -328,9 +330,20 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
       if (r.kind === 'unexpected') {
         const s = r.res?.status
         if (s === 'phone_has_ballot') {
-          setBallot(r.res.ballot)
+          setBallot({ state: r.res.ballot, answered: r.res.answered })
           setLinkChecked(false)
           return setStep('link')
+        }
+        if (s === 'consent_outdated') {
+          setStep('form')
+          return setError(
+            `The consent notice has changed${r.res.consent_version ? ` (now ${r.res.consent_version})` : ''}. ` +
+              'Close this, refresh, and go through the current notice with them. Nothing was created.',
+          )
+        }
+        if (s === 'adult_required') {
+          setStep('form')
+          return setError('Only adults can be registered for now. Nothing was created.')
         }
         if (s === 'phone_registered') {
           setStep('form')
@@ -358,6 +371,9 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
     if (name.trim().length < 2) return setError('Enter their full name.')
     if (!isValidPhone(phone)) return setError('Enter a valid phone number, e.g. 08012345678.')
     if (!checked) return setError('Confirm that you’ve checked who they are.')
+    if (!consentVersion) return setError('No consent notice is available. Refresh and try again.')
+    if (!consented) return setError('Confirm that they’ve read the privacy notice and agree.')
+    if (!adult) return setError('Only adults (18 or over) can be registered for now.')
     submit(false)
   }
 
@@ -429,12 +445,14 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
         <div className="callout warn">
           <p>
             {masked} started a ballot on the voting page. It is{' '}
-            <strong>{ballot === 'submitted' ? 'already submitted' : 'not finished yet'}</strong>.
+            <strong>{ballot?.state === 'submitted' ? 'already submitted' : 'not finished yet'}</strong>
+            {typeof ballot?.answered === 'number' && ` (${ballot.answered} answered)`}.
           </p>
           <p>
             Linking attaches that ballot to the new account. From then on it can only be continued
             by signing in with the voter code, and the voting page on their phone stops saving
-            changes to it. {ballot === 'submitted' && 'Their submitted votes stay exactly as they are.'}
+            changes to it. Every vote already on it is kept.
+            {ballot?.state === 'submitted' && ' Their submitted votes stay exactly as they are.'}
           </p>
         </div>
         <label className="ackRow">
@@ -474,7 +492,21 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
           <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
           <span>I’ve checked who they are, in person, and that this is their own number</span>
         </label>
-        <p className="dim small">Development database: use synthetic test identities only.</p>
+        <label className="ackRow">
+          <input type="checkbox" checked={consented} onChange={(e) => setConsented(e.target.checked)} />
+          <span>
+            They’ve read the privacy notice{consentVersion ? ` (version ${consentVersion})` : ''} and
+            agree to an account being kept for voting
+          </span>
+        </label>
+        <label className="ackRow">
+          <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} />
+          <span>They are 18 or over</span>
+        </label>
+        <p className="dim small">
+          Under-18 registration isn’t available yet. Development database: use synthetic test
+          identities only.
+        </p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="dialogActions">
           <button type="button" className="btn ghost small" onClick={onClose} disabled={busy}>
@@ -493,8 +525,11 @@ export function RegisterInPersonDialog({ api, adminLabel, onDone, onClose, onRei
 
 export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone, onClose, onReissue }) {
   const [busy, run] = useOneAtATime()
-  const [step, setStep] = useState('confirm') // confirm | code | approved | rejected | unknown
+  const [step, setStep] = useState('confirm') // confirm | link | code | approved | rejected | unknown
   const [checked, setChecked] = useState(decision === 'reject')
+  const [linkChecked, setLinkChecked] = useState(false)
+  const [ballot, setBallot] = useState(null) // { state, answered }
+  const [linked, setLinked] = useState(false)
   const [code, setCode] = useState('')
   const [found, setFound] = useState(null)
   // Reissue is offered only if the lost reply was ours AND the account was
@@ -516,24 +551,27 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
     return reviewOutcome(review, reviews, voters, adminLabel)
   }
 
-  async function resolve() {
+  async function resolve(link = false) {
     await run(async () => {
       setError('')
-      const r = await api.resolveReview(review.id, decision)
+      const r = await api.resolveReview(review.id, decision, link)
       if (r.kind === 'unauthorized') return
       if (r.kind === 'ok') {
         if (!approve) return onDone(`Registration for ${review.full_name} rejected.`)
         setCode(r.res.voter_code)
+        setLinked(r.res.linked_ballot === true)
         return setStep('code')
+      }
+      if (r.kind === 'unexpected' && r.res?.status === 'adult_required') {
+        return setError('Only adults can be registered for now, so this can’t be approved. Reject it instead.')
       }
       if (r.kind === 'unexpected' && r.res?.status === 'phone_registered') {
         return setError('This number already has a voter account, so it can’t be approved. Reject this review instead.')
       }
       if (r.kind === 'unexpected' && r.res?.status === 'phone_has_ballot') {
-        return setError(
-          'This number already has a ballot from the voting page, so it can’t be approved here. ' +
-            'Reject this review, then use “Register in person” and link the ballot after checking who they are.',
-        )
+        setBallot({ state: r.res.ballot, answered: r.res.answered })
+        setLinkChecked(false)
+        return setStep('link')
       }
       const out = await check()
       if (!out) return
@@ -564,8 +602,41 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
         <p className="dim small">
           For {review.full_name} ({review.phone}). Their phone will say the registration is
           complete; they sign in with this code.
+          {linked && ' Their existing ballot is linked: they continue it after signing in.'}
         </p>
       </CodeHandover>
+    )
+  }
+
+  if (step === 'link') {
+    return (
+      <Dialog title="This number already has a ballot" onClose={busy ? () => {} : onClose} canDismiss={!busy}>
+        <div className="callout warn">
+          <p>
+            {review.phone} started a ballot on the voting page. It is{' '}
+            <strong>{ballot?.state === 'submitted' ? 'already submitted' : 'not finished yet'}</strong>
+            {typeof ballot?.answered === 'number' && ` (${ballot.answered} answered)`}.
+          </p>
+          <p>
+            Approving can link that ballot to the new account. Every vote on it is kept, and from
+            then on it can only be continued by signing in with the voter code. Only link it if
+            you’ve confirmed this person started it; otherwise reject this review.
+          </p>
+        </div>
+        <label className="ackRow">
+          <input type="checkbox" checked={linkChecked} onChange={(e) => setLinkChecked(e.target.checked)} data-autofocus />
+          <span>I’ve confirmed with this person that they started that ballot</span>
+        </label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="dialogActions">
+          <button type="button" className="btn ghost small" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary small" onClick={() => resolve(true)} disabled={busy || !linkChecked}>
+            {busy ? 'Saving…' : 'Approve and link ballot'}
+          </button>
+        </div>
+      </Dialog>
     )
   }
 
@@ -650,12 +721,133 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
         <button
           type="button"
           className={`btn ${approve ? 'primary' : 'danger'} small`}
-          onClick={resolve}
+          onClick={() => resolve(false)}
           disabled={busy || !checked}
         >
           {busy ? 'Saving…' : approve ? 'Approve and show code' : 'Reject'}
         </button>
       </div>
+    </Dialog>
+  )
+}
+
+// ---------- restore ----------
+
+export function RestoreVoterDialog({ voter, api, onDone, onClose }) {
+  const [busy, run] = useOneAtATime()
+  const [step, setStep] = useState('confirm') // confirm | code | restored_unseen
+  const [reason, setReason] = useState('')
+  const [checked, setChecked] = useState(false)
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => () => setCode(''), [])
+
+  async function restore() {
+    await run(async () => {
+      setError('')
+      const r = await api.restore(voter.id, reason)
+      if (r.kind === 'unauthorized') return
+      if (r.kind === 'ok') {
+        setCode(r.res.voter_code)
+        return setStep('code')
+      }
+      if (r.kind === 'unexpected') {
+        const s = r.res?.status
+        if (s === 'not_revoked') {
+          return onDone('This account is already active (someone may have just restored it). Nothing was changed.')
+        }
+        if (s === 'not_found') return setError('This account no longer exists. Refresh the list.')
+        return setError('The server refused this. Check the reason (at least 3 characters). Nothing was changed.')
+      }
+      // No reply: look it up before anything else.
+      const now = voterStatusNow(voter.id, await api.list(lastDigits(voter.phone), 0, VERIFY_LIMIT))
+      if (now.outcome === 'revoked') {
+        return setError('The connection dropped and the account is still revoked: nothing was changed. You can try again.')
+      }
+      if (now.outcome === 'active') return setStep('restored_unseen')
+      setError('Couldn’t confirm whether the account was restored. Close this, refresh the list and check its status.')
+    })
+  }
+
+  if (step === 'code') {
+    return (
+      <CodeHandover
+        title="Account restored"
+        name={voter.full_name}
+        code={code}
+        onClose={() => {
+          setCode('')
+          onDone(`${voter.full_name}’s account is active again with a new code.`)
+        }}
+      >
+        <p className="dim small">
+          For {voter.full_name} ({voter.phone}). Their old code still doesn’t work; only this one does.
+        </p>
+      </CodeHandover>
+    )
+  }
+
+  if (step === 'restored_unseen') {
+    return (
+      <Dialog title="Restored, but the code didn’t arrive" onClose={() => onDone(null)}>
+        <div className="callout warn" role="alert">
+          <p>
+            The connection dropped, but the account is <strong>active again</strong>. Its new code
+            didn’t reach you and can’t be shown again. Their old code still doesn’t work.
+          </p>
+          <p>
+            If you restored it yourself just now, use “Reissue code” on their row (their identity
+            is checked again). If another admin may have restored it, ask them first: reissuing
+            cancels the code they handed over.
+          </p>
+        </div>
+        <div className="dialogActions">
+          <button type="button" className="btn primary small" onClick={() => onDone(null)} data-autofocus>
+            Close
+          </button>
+        </div>
+      </Dialog>
+    )
+  }
+
+  return (
+    <Dialog title={`Restore ${voter.full_name}’s account?`} onClose={busy ? () => {} : onClose} canDismiss={!busy}>
+      <dl className="codeFacts">
+        <div><dt>Phone</dt><dd>{voter.phone}</dd></div>
+        <div><dt>Ballot</dt><dd>{BALLOT_LABELS[voter.ballot] ?? voter.ballot}</dd></div>
+      </dl>
+      <div className="callout info">
+        <p>
+          The account becomes active with a <strong>new code</strong>, shown once. The old code never
+          works again. Their ballot and votes are unchanged.
+        </p>
+      </div>
+      <form
+        className="form dialogForm"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (checked && reason.trim().length >= 3) restore()
+        }}
+      >
+        <label>
+          <span>Reason (kept in the audit log)</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} data-autofocus />
+        </label>
+        <label className="ackRow">
+          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+          <span>I’ve checked this person’s identity in person</span>
+        </label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="dialogActions">
+          <button type="button" className="btn ghost small" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn primary small" disabled={busy || !checked || reason.trim().length < 3}>
+            {busy ? 'Restoring…' : 'Restore with a new code'}
+          </button>
+        </div>
+      </form>
     </Dialog>
   )
 }

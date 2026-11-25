@@ -20,6 +20,7 @@ import {
   RegisterInPersonDialog,
   ReissueDialog,
   ResolveReviewDialog,
+  RestoreVoterDialog,
   RevokeVoterDialog,
 } from './VoterDialogs.jsx'
 import './voters.css'
@@ -128,6 +129,9 @@ export default function VotersTab({ adminRpc, adminLabel }) {
             ['Registered online', s.self_registered],
             ['Reviews waiting', s.reviews_pending],
             ['Voter ballots submitted', s.voter_ballots_submitted],
+            ...(typeof s.voters_without_consent === 'number'
+              ? [['Accounts without a consent record', s.voters_without_consent]]
+              : []),
           ].map(([label, n]) => (
             <div className="codeStat" key={label}>
               <span className="statNum">{n}</span>
@@ -157,7 +161,11 @@ export default function VotersTab({ adminRpc, adminLabel }) {
           ))}
         </div>
         <p className="dim small">{MODES[s.registration_mode]?.effect}</p>
-        <p className="dim tiny">Verification: {s.verification_provider === 'simulated' ? 'simulated (development)' : s.verification_provider}</p>
+        <p className="dim tiny">
+          Verification: {s.verification_provider === 'simulated' ? 'simulated (development)' : s.verification_provider}
+          {s.consent_version && ` · Consent notice: ${s.consent_version}`}
+          {s.adults_only && ' · Adults only'}
+        </p>
       </section>
 
       <ReviewQueue
@@ -171,6 +179,7 @@ export default function VotersTab({ adminRpc, adminLabel }) {
         reloadKey={reloadKey}
         onReissue={(voter) => { setNotice(''); setDialog({ type: 'reissue', voter }) }}
         onRevoke={(voter) => { setNotice(''); setDialog({ type: 'revoke', voter }) }}
+        onRestore={(voter) => { setNotice(''); setDialog({ type: 'restore', voter }) }}
       />
 
       {dialog?.type === 'mode' && (
@@ -180,6 +189,7 @@ export default function VotersTab({ adminRpc, adminLabel }) {
         <RegisterInPersonDialog
           api={api}
           adminLabel={adminLabel}
+          consentVersion={s.consent_version}
           onDone={done}
           onClose={() => done(null)}
           onReissue={(voter) => setDialog({ type: 'reissue', voter })}
@@ -198,6 +208,9 @@ export default function VotersTab({ adminRpc, adminLabel }) {
       )}
       {dialog?.type === 'reissue' && (
         <ReissueDialog voter={dialog.voter} api={api} onDone={done} onClose={() => done(null)} />
+      )}
+      {dialog?.type === 'restore' && (
+        <RestoreVoterDialog voter={dialog.voter} api={api} onDone={done} onClose={() => setDialog(null)} />
       )}
       {dialog?.type === 'revoke' && (
         <RevokeVoterDialog voter={dialog.voter} api={api} onDone={done} onClose={() => setDialog(null)} />
@@ -257,7 +270,7 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
   )
 }
 
-function VoterList({ api, reloadKey, onReissue, onRevoke }) {
+function VoterList({ api, reloadKey, onReissue, onRevoke, onRestore }) {
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
@@ -353,6 +366,16 @@ function VoterList({ api, reloadKey, onReissue, onRevoke }) {
                   {v.last_login_at ? formatDateTime(v.last_login_at) : <span className="dim">Never</span>}
                 </td>
                 <td className="actionCell">
+                  {v.status === 'revoked' && (
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      onClick={() => onRestore(v)}
+                      aria-label={`Restore ${v.full_name}’s account`}
+                    >
+                      Restore
+                    </button>
+                  )}
                   {v.status === 'active' && (
                     <div className="adminActions">
                       <button

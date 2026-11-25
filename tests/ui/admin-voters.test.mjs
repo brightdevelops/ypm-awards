@@ -20,6 +20,7 @@ import { START_REFUSALS, isAccountBallot } from '../../src/lib/ballotMessages.js
 import { freshDb, call, sql, login, LEGACY, INVENTOR_KEY, DEV_SIM_SQL } from '../db/helpers.mjs'
 
 const root = (p) => fileURLToPath(new URL(`../../${p}`, import.meta.url))
+const CV = 'draft-2026-11-dev' // the seeded development consent notice
 const CODE_RE = /^YPM-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/
 
 // The dashboard's adminRpc, played by the test database. `lose` makes the
@@ -130,10 +131,16 @@ describe('server-side authorization', () => {
     admin_voter_stats: {},
     admin_list_voters: { p_search: null, p_limit: 50, p_offset: 0 },
     admin_list_reviews: {},
-    admin_register_voter: { p_name: 'Test Person', p_phone: '08155500700', p_link_existing_ballot: false },
+    admin_register_voter: {
+      p_name: 'Test Person', p_phone: '08155500700', p_consent_version: 'draft-2026-11-dev',
+      p_adult_confirmed: true, p_link_existing_ballot: false,
+    },
     admin_reissue_voter_code: { p_voter_id: '00000000-0000-0000-0000-000000000000' },
     admin_revoke_voter: { p_voter_id: '00000000-0000-0000-0000-000000000000', p_reason: null },
-    admin_resolve_review: { p_registration_id: '00000000-0000-0000-0000-000000000000', p_decision: 'approve' },
+    admin_resolve_review: {
+      p_registration_id: '00000000-0000-0000-0000-000000000000', p_decision: 'approve', p_link_existing_ballot: false,
+    },
+    admin_restore_voter: { p_voter_id: '00000000-0000-0000-0000-000000000000', p_reason: 'test reason' },
     admin_set_registration_mode: { p_mode: 'required' },
   }
 
@@ -195,7 +202,7 @@ describe('registration mode', () => {
 describe('in-person registration (no biometrics)', () => {
   it('creates an account, shows the code once, and the code works', async () => {
     const { db, api } = await setup()
-    const r = await api.registerInPerson('Test Inperson', '08155500710')
+    const r = await api.registerInPerson('Test Inperson', '08155500710', CV, true)
     assert.equal(r.kind, 'ok')
     assert.match(r.res.voter_code, CODE_RE)
     const login1 = await call(db, 'voter_login', { p_code: r.res.voter_code })
@@ -210,7 +217,7 @@ describe('in-person registration (no biometrics)', () => {
     assert.ok(!JSON.stringify(list.res).includes('08155500710'), 'full number never sent')
     assert.ok(!JSON.stringify(list.res).includes(r.res.voter_code), 'code never listed')
 
-    const again = await api.registerInPerson('Test Inperson', '08155500710')
+    const again = await api.registerInPerson('Test Inperson', '08155500710', CV, true)
     assert.equal(again.kind, 'unexpected')
     assert.equal(again.res.status, 'phone_registered')
     assert.equal(await voterCount(db, '08155500710'), 1)
@@ -221,12 +228,12 @@ describe('in-person registration (no biometrics)', () => {
     const b = await call(db, 'begin_ballot', { p_name: 'Test Linked', p_phone: '08155500711', p_code: null })
     await call(db, 'save_vote', { p_ballot_id: b.ballot_id, p_category_id: 'most-reliable-youth', p_nominee_name: 'Peace Williams' })
 
-    const first = await api.registerInPerson('Test Linked', '08155500711')
+    const first = await api.registerInPerson('Test Linked', '08155500711', CV, true)
     assert.equal(first.kind, 'unexpected')
-    assert.deepEqual(first.res, { status: 'phone_has_ballot', ballot: 'in_progress' })
+    assert.deepEqual(first.res, { status: 'phone_has_ballot', ballot: 'in_progress', answered: 1 })
     assert.equal(await voterCount(db, '08155500711'), 0)
 
-    const linked = await api.registerInPerson('Test Linked', '08155500711', true)
+    const linked = await api.registerInPerson('Test Linked', '08155500711', CV, true, true)
     assert.equal(linked.kind, 'ok')
     assert.equal(linked.res.linked_ballot, true)
 
@@ -247,7 +254,7 @@ describe('in-person registration (no biometrics)', () => {
 
   it('a lost reply is checked before anything else, and never makes a second account', async () => {
     const after = await setup({ lose: (fn) => (fn === 'admin_register_voter' ? 'after' : null) })
-    const r = await after.api.registerInPerson('Test Lostreply', '08155500712')
+    const r = await after.api.registerInPerson('Test Lostreply', '08155500712', CV, true)
     assert.equal(r.kind, 'network')
     const masked = maskLikeServer('08155500712')
     const out = inPersonOutcome('Test Lostreply', masked, await after.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'leader')
@@ -258,7 +265,7 @@ describe('in-person registration (no biometrics)', () => {
     assert.equal(await voterCount(after.db, '08155500712'), 1)
 
     const before = await setup({ lose: (fn) => (fn === 'admin_register_voter' ? 'before' : null) })
-    await before.api.registerInPerson('Test Lostreply', '08155500712')
+    await before.api.registerInPerson('Test Lostreply', '08155500712', CV, true)
     const out2 = inPersonOutcome('Test Lostreply', masked, await before.api.list(lastDigits(masked), 0, VERIFY_LIMIT), 'leader')
     assert.equal(out2.outcome, 'not_created')
     assert.equal(await voterCount(before.db, '08155500712'), 0)
@@ -273,7 +280,7 @@ describe('in-person registration (no biometrics)', () => {
 describe('reissue and revoke', () => {
   it('reissue: the old code and sessions stop, the new code works, a double click sends one request', async () => {
     const { db, api, rpc } = await setup()
-    const reg = await api.registerInPerson('Test Reissue', '08155500720')
+    const reg = await api.registerInPerson('Test Reissue', '08155500720', CV, true)
     const oldCode = reg.res.voter_code
     const oldSession = (await call(db, 'voter_login', { p_code: oldCode })).session
     const voterId = reg.res.voter_id
@@ -294,7 +301,7 @@ describe('reissue and revoke', () => {
 
   it('revoke: the account stops at once, the ballot is kept, and it can’t be reissued', async () => {
     const { db, api } = await setup()
-    const reg = await api.registerInPerson('Test Revoke', '08155500721')
+    const reg = await api.registerInPerson('Test Revoke', '08155500721', CV, true)
     const session = (await call(db, 'voter_login', { p_code: reg.res.voter_code })).session
     await call(db, 'voter_begin_ballot', { p_session: session })
     await call(db, 'voter_save_vote', { p_session: session, p_category_id: 'most-reliable-youth', p_nominee_name: 'Peace Williams' })
@@ -316,7 +323,7 @@ describe('reissue and revoke', () => {
 
   it('a lost revoke reply is checked with the server', async () => {
     const { api, db } = await setup({ lose: (fn) => (fn === 'admin_revoke_voter' ? 'after' : null) })
-    const reg = await api.registerInPerson('Test Revokelost', '08155500722')
+    const reg = await api.registerInPerson('Test Revokelost', '08155500722', CV, true)
     assert.equal((await api.revoke(reg.res.voter_id)).kind, 'network')
     const now = voterStatusNow(reg.res.voter_id, await api.list('0722', 0, VERIFY_LIMIT))
     assert.equal(now.outcome, 'revoked')
@@ -387,7 +394,7 @@ describe('reviews', () => {
 
     // Rejected, then the same person registered in person: still "not
     // approved" (that account didn't come from this review).
-    const inPerson = await s3.api.registerInPerson('Test Otheradmin', '08155500735')
+    const inPerson = await s3.api.registerInPerson('Test Otheradmin', '08155500735', CV, true)
     assert.equal(inPerson.kind, 'ok')
     assert.equal((await check(s3.api, r3)).outcome, 'not_approved')
 
@@ -433,7 +440,7 @@ describe('legacy compatibility', () => {
     const withCode = await call(db, 'begin_ballot', { p_name: 'Test Anon', p_phone: '08155500740', p_code: issued.codes[0].code })
     assert.equal(withCode.status, 'started')
 
-    const reg = await api.registerInPerson('Test Nocode', '08155500741')
+    const reg = await api.registerInPerson('Test Nocode', '08155500741', CV, true)
     const vs = (await call(db, 'voter_login', { p_code: reg.res.voter_code })).session
     assert.equal((await call(db, 'voter_begin_ballot', { p_session: vs })).status, 'started')
   })
@@ -441,7 +448,7 @@ describe('legacy compatibility', () => {
   it('the dashboard totals include registered voters’ ballots', async () => {
     const { db, session, api } = await setup()
     const before = await call(db, 'admin_dashboard', { p_session: session })
-    const reg = await api.registerInPerson('Test Totals', '08155500742')
+    const reg = await api.registerInPerson('Test Totals', '08155500742', CV, true)
     const vs = (await call(db, 'voter_login', { p_code: reg.res.voter_code })).session
     await call(db, 'voter_begin_ballot', { p_session: vs })
     const after = await call(db, 'admin_dashboard', { p_session: session })
@@ -493,9 +500,9 @@ describe('the tab keeps codes and numbers to itself', () => {
     assert.match(dialogs, /\{step === 'approved' && mine && \(/)
   })
 
-  it('warns that revoking can’t be undone from the dashboard', () => {
+  it('explains that a revoked account can be restored, with a new code', () => {
     const dialogs = files[2][1]
-    assert.match(dialogs, /no way to undo this from the dashboard/)
+    assert.match(dialogs, /restoring always issues a new code/)
     assert.match(files[1][1], /not a biometric comparison/)
   })
 })
@@ -507,7 +514,7 @@ describe('the synthetic-credential revocation procedure (not run on any real dat
 
   async function seeded(environment) {
     const { db, session, api } = await setup()
-    const keep = await api.registerInPerson('Test Keepvotes', '08155500901')
+    const keep = await api.registerInPerson('Test Keepvotes', '08155500901', CV, true)
     const vs = (await call(db, 'voter_login', { p_code: keep.res.voter_code })).session
     await call(db, 'voter_begin_ballot', { p_session: vs })
     const { token } = await reviewFor(db, session, 'Test Waiting', '08155500902')
@@ -520,6 +527,10 @@ describe('the synthetic-credential revocation procedure (not run on any real dat
     await call(db, 'dev_simulate_verification', {
       p_admin_session: session, p_registration_token: approved.registration_token, p_outcome: 'approved',
     })
+    if (environment !== 'development') {
+      // 004: registration and the simulator must be off before leaving development.
+      await sql(db, `update settings set registration_mode = 'off', verification_provider = 'none' where id = 1`)
+    }
     await sql(db, `update ypm_private.deployment set environment = $1`, [environment])
     return { db, code: keep.res.voter_code, vs, reviewToken: token, pending: pending.registration_token, approved: approved.registration_token }
   }
@@ -543,9 +554,14 @@ describe('the synthetic-credential revocation procedure (not run on any real dat
 
   it('on a database not marked development: changes nothing', async () => {
     const t = await seeded('production')
+    const before = await sql(t.db, `select (select json_agg(v order by id) from voters v) a,
+      (select json_agg(r order by id) from voter_registrations r) b, (select count(*) from voter_sessions) c`)
     for (const s of steps) await t.db.query(s)
-    assert.equal((await call(t.db, 'voter_login', { p_code: t.code })).status, 'ok')
-    assert.equal((await call(t.db, 'voter_registration_status', { p_token: t.reviewToken })).status, 'review')
+    const after = await sql(t.db, `select (select json_agg(v order by id) from voters v) a,
+      (select json_agg(r order by id) from voter_registrations r) b, (select count(*) from voter_sessions) c`)
+    assert.deepEqual(after, before)
+    // And on a production-marked database every voter function is off anyway.
+    assert.equal((await call(t.db, 'voter_login', { p_code: t.code })).status, 'disabled')
     assert.equal(Number((await sql(t.db, `select count(*) n from admin_audit where action = 'synthetic_credentials_revoked'`))[0].n), 0)
   })
 })

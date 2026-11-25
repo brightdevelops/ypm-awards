@@ -39,6 +39,8 @@ describe('production build', () => {
         'admin_revoke_voter',
         'admin_resolve_review',
         'admin_set_registration_mode',
+        'admin_restore_voter',
+        'Restore with a new code',
         'Registered voters',
         'Register in person',
         'voterHandover',

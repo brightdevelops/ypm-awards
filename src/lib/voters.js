@@ -20,13 +20,15 @@ export { isMissingFunction } from './rpcErrors.js'
 //   isDev:  import.meta.env.DEV (decided at build time; a production build
 //           doesn't contain this tab, whatever environment variables say)
 //   stats:  the adminRpc result of admin_voter_stats
-// The server-side half: verification_provider can only be set to
-// 'simulated' on a database marked as development (a trigger in migration
-// 003 refuses it otherwise), so a production database never shows 'simulated'.
+// The server-side half: with migration 004 every voter function answers
+// "disabled" unless the database is marked as development; and
+// verification_provider can only be 'simulated' on a development database
+// (003), so a production database never shows 'simulated' either.
 export function voterAccess(isDev, stats) {
   if (!isDev) return 'hidden'
   if (!stats) return 'loading'
   if (stats.kind === 'network') return stats.missing ? 'not_installed' : 'unreachable'
+  if (stats.kind === 'unexpected' && stats.res?.status === 'disabled') return 'not_development'
   if (stats.kind !== 'ok') return 'unreachable'
   if (stats.res.verification_provider !== 'simulated') return 'not_development'
   return 'ready'
@@ -54,10 +56,13 @@ export function createVoterAdmin(adminRpc) {
       }),
     reviews: () => adminRpc('admin_list_reviews'),
 
-    resolveReview: (registrationId, decision) =>
+    // p_link_existing_ballot is sent only when linking (004 defaults it to
+    // false), so plain approvals also work on a database still at 003.
+    resolveReview: (registrationId, decision, linkExistingBallot = false) =>
       once(`review:${registrationId}`, 'admin_resolve_review', {
         p_registration_id: registrationId,
         p_decision: decision,
+        ...(linkExistingBallot === true ? { p_link_existing_ballot: true } : {}),
       }),
     reissue: (voterId) => once(`reissue:${voterId}`, 'admin_reissue_voter_code', { p_voter_id: voterId }),
     revoke: (voterId, reason) =>
@@ -65,11 +70,18 @@ export function createVoterAdmin(adminRpc) {
         p_voter_id: voterId,
         p_reason: reason?.trim() || null,
       }),
-    registerInPerson: (name, phone, linkExistingBallot = false) =>
+    registerInPerson: (name, phone, consentVersion, adultConfirmed, linkExistingBallot = false) =>
       once(`register:${phone}`, 'admin_register_voter', {
         p_name: name.trim(),
         p_phone: phone,
+        p_consent_version: consentVersion,
+        p_adult_confirmed: adultConfirmed === true,
         p_link_existing_ballot: linkExistingBallot === true,
+      }),
+    restore: (voterId, reason) =>
+      once(`restore:${voterId}`, 'admin_restore_voter', {
+        p_voter_id: voterId,
+        p_reason: reason.trim(),
       }),
     setMode: (mode) => once('mode', 'admin_set_registration_mode', { p_mode: mode }),
   }
