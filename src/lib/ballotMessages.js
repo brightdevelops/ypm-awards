@@ -16,3 +16,26 @@ export const START_REFUSALS = {
 export function isAccountBallot(data) {
   return data?.status === 'error' && data?.message === 'sign in with your voter code'
 }
+
+// What a submit_ballot reply means. Only an explicit 'ok' from the server
+// counts as submitted: anything else (no reply, an error, an unknown ballot,
+// a reply this page doesn't recognise) leaves the ballot unsubmitted on this
+// phone. Submitting again is safe: the server never submits a ballot twice.
+//   submitted | closed | account | unknown_ballot | unconfirmed
+export function submitOutcome(data, err) {
+  if (err || !data || typeof data !== 'object') return 'unconfirmed'
+  if (data.status === 'ok') return 'submitted'
+  if (data.status === 'closed') return 'closed'
+  if (isAccountBallot(data)) return 'account'
+  if (data.status === 'error' && data.message === 'unknown ballot') return 'unknown_ballot'
+  return 'unconfirmed'
+}
+
+export const SUBMIT_MESSAGES = {
+  unconfirmed:
+    'We couldn’t confirm that your vote was submitted. Your picks are still saved on this ' +
+    'phone. Check your connection and tap Submit again.',
+  unknown_ballot:
+    'Your vote has not been submitted: this ballot couldn’t be found. Your picks are still ' +
+    'on this phone. Please show this message to a youth leader before closing the page.',
+}

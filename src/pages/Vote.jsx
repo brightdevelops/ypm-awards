@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
 import { normalizePhone, isValidPhone } from '../lib/phone.js'
-import { START_REFUSALS, isAccountBallot } from '../lib/ballotMessages.js'
+import { START_REFUSALS, SUBMIT_MESSAGES, isAccountBallot, submitOutcome } from '../lib/ballotMessages.js'
 
 const STORE_KEY = 'ypm-awards-ballot-v1'
 const ANNOUNCE = '19 December'
@@ -252,18 +252,24 @@ export default function Vote() {
     })
     setBusy(false)
 
-    if (err) return setError('Could not submit. Check your connection and try again.')
-    if (data?.status === 'closed') {
-      setVotingOpen(false)
-      return setView('closed')
+    // Never show "Your vote is in" without the server saying so.
+    switch (submitOutcome(data, err)) {
+      case 'submitted':
+        persist({ completed: true })
+        return setView('done')
+      case 'closed':
+        setVotingOpen(false)
+        return setView('closed')
+      case 'account':
+        accountBallot.current = true
+        return setView('account')
+      case 'unknown_ballot':
+        return setError(SUBMIT_MESSAGES.unknown_ballot)
+      default:
+        return setError(
+          err ? 'Could not submit. Check your connection and try again.' : SUBMIT_MESSAGES.unconfirmed,
+        )
     }
-    if (isAccountBallot(data)) {
-      accountBallot.current = true
-      return setView('account')
-    }
-
-    persist({ completed: true })
-    setView('done')
   }
 
   /* ---------- screens ---------- */
@@ -446,7 +452,7 @@ export default function Vote() {
               {skipped.length === 1 ? 'category' : 'categories'}. You can submit anyway.
             </p>
           )}
-          {error && <p className="error">{error}</p>}
+          {error && <p className="error" role="alert">{error}</p>}
 
           <button className="btn primary" onClick={submitBallot} disabled={busy}>
             {busy ? 'Submitting…' : 'Submit my votes'}
