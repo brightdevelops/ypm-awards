@@ -1,14 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
-import { BALLOT } from '../data/categories.js'
-import { buildResults } from '../lib/tally.js'
-
-const votesLabel = (n) => `${n} ${n === 1 ? 'vote' : 'votes'}`
+import ResultsTab from '../components/admin/ResultsTab.jsx'
+import CodesTab from '../components/admin/CodesTab.jsx'
+import ActivityTab from '../components/admin/ActivityTab.jsx'
+import '../admin.css'
 
 // One saved session per door, so signing in at /inventor doesn't sign out /admin.
-// Only the session token is kept (it expires after 12 hours), never the key.
+// Only the session token (and when it expires) is kept, never the key.
+// Voting codes are never stored anywhere in the browser.
 const DOOR = window.location.pathname.replace(/\/+$/, '') || '/admin'
 const SESSION_STORE = `ypm-awards-admin-session${DOOR}`
+const EXPIRES_STORE = `${SESSION_STORE}:expires`
+const TAB_STORE = `ypm-awards-admin-tab${DOOR}`
+
+const TABS = [
+  { id: 'results', label: 'Results' },
+  { id: 'codes', label: 'Voting codes' },
+  { id: 'activity', label: 'Activity' },
+]
 
 function readSession() {
   try {
@@ -20,12 +29,35 @@ function readSession() {
   }
 }
 
-function writeSession(token) {
+function readExpiry() {
   try {
-    if (token) sessionStorage.setItem(SESSION_STORE, token)
-    else sessionStorage.removeItem(SESSION_STORE)
+    const t = Date.parse(sessionStorage.getItem(EXPIRES_STORE) || '')
+    return Number.isNaN(t) ? null : t
+  } catch {
+    return null
+  }
+}
+
+function writeSession(token, expiresAt) {
+  try {
+    if (token) {
+      sessionStorage.setItem(SESSION_STORE, token)
+      if (expiresAt) sessionStorage.setItem(EXPIRES_STORE, expiresAt)
+    } else {
+      sessionStorage.removeItem(SESSION_STORE)
+      sessionStorage.removeItem(EXPIRES_STORE)
+    }
   } catch {
     /* private mode — you'll just sign in again on reload */
+  }
+}
+
+function readTab() {
+  try {
+    const t = sessionStorage.getItem(TAB_STORE)
+    return TABS.some((x) => x.id === t) ? t : 'results'
+  } catch {
+    return 'results'
   }
 }
 
@@ -36,26 +68,52 @@ export default function Admin() {
   const [weakKey, setWeakKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [showVoters, setShowVoters] = useState(false)
+  const [tab, setTab] = useState(readTab)
+  const tabRefs = useRef({})
 
-  function signedOut(message = '') {
+  // Signing out unmounts the whole dashboard, which clears anything held in
+  // it, including codes on the show-once screen.
+  const signedOut = useCallback((message = '') => {
     writeSession('')
     setSession('')
     setData(null)
     setError(message)
-  }
+  }, [])
 
-  async function load(token = session) {
-    setBusy(true)
-    setError('')
-    const { data: res, error: err } = await supabase.rpc('admin_dashboard', { p_session: token })
-    setBusy(false)
+  const load = useCallback(
+    async (token = session) => {
+      setBusy(true)
+      setError('')
+      const { data: res, error: err } = await supabase.rpc('admin_dashboard', { p_session: token })
+      setBusy(false)
 
-    if (err) return setError('Could not load. Check your connection and refresh.')
-    if (res?.status !== 'ok') return signedOut('Your session has ended. Please sign in again.')
-    setData(res)
-    return true
-  }
+      if (err) return setError('Could not load. Check your connection and refresh.')
+      if (res?.status !== 'ok') return signedOut('Your session has ended. Please sign in again.')
+      setData(res)
+      return true
+    },
+    [session, signedOut],
+  )
+
+  // One place that turns an admin RPC into { kind: 'ok' | 'unauthorized' |
+  // 'unexpected' | 'network', res }. Never retries.
+  const adminRpc = useCallback(
+    async (fn, args = {}) => {
+      try {
+        const { data: res, error: err } = await supabase.rpc(fn, { p_session: session, ...args })
+        if (err) return { kind: 'network' }
+        if (res?.status === 'unauthorized') {
+          signedOut('Your session has ended. Please sign in again.')
+          return { kind: 'unauthorized' }
+        }
+        if (res?.status !== 'ok') return { kind: 'unexpected', res }
+        return { kind: 'ok', res }
+      } catch {
+        return { kind: 'network' }
+      }
+    },
+    [session, signedOut],
+  )
 
   async function signIn(e) {
     e.preventDefault()
@@ -71,7 +129,7 @@ export default function Admin() {
 
     setKey('')
     setWeakKey(res.weak_key === true)
-    writeSession(res.session)
+    writeSession(res.session, res.expires_at)
     setSession(res.session)
     await load(res.session)
   }
@@ -85,6 +143,46 @@ export default function Admin() {
     if (session) load(session)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Sign out on this device when the session's 12 hours are up, even if the
+  // page is just sitting open (e.g. on the show-once code screen).
+  useEffect(() => {
+    if (!session) return
+    const expiresAt = readExpiry()
+    if (!expiresAt) return
+    const end = () => signedOut('Your session has ended. Please sign in again.')
+    const check = () => {
+      if (Date.now() >= expiresAt) end()
+    }
+    const timer = setTimeout(end, Math.min(Math.max(expiresAt - Date.now(), 0), 2 ** 31 - 1))
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [session, signedOut])
+
+  function chooseTab(id) {
+    setTab(id)
+    try {
+      sessionStorage.setItem(TAB_STORE, id)
+    } catch {
+      /* not important */
+    }
+  }
+
+  function onTabKey(e) {
+    const i = TABS.findIndex((t) => t.id === tab)
+    let next = null
+    if (e.key === 'ArrowRight') next = TABS[(i + 1) % TABS.length]
+    else if (e.key === 'ArrowLeft') next = TABS[(i - 1 + TABS.length) % TABS.length]
+    else if (e.key === 'Home') next = TABS[0]
+    else if (e.key === 'End') next = TABS[TABS.length - 1]
+    if (!next) return
+    e.preventDefault()
+    chooseTab(next.id)
+    tabRefs.current[next.id]?.focus()
+  }
 
   async function toggleVoting() {
     const next = !data.voting_open
@@ -192,18 +290,15 @@ export default function Admin() {
     )
   }
 
-  const results = buildResults(BALLOT, data.tally)
-  const { totals } = results
-
   return (
-    <div className="shell">
+    <div className="shell adminShell">
       <div className="inner wide">
         <div className="adminHead">
           <div>
             <p className="eyebrow">
               YPM Youth Awards{data.key_label ? ` · ${data.key_label}` : ''}
             </p>
-            <h1 className="display">Results dashboard</h1>
+            <h1 className="display">Admin dashboard</h1>
           </div>
           <div className="adminActions">
             <button className="btn ghost small" onClick={() => load()} disabled={busy}>
@@ -249,7 +344,7 @@ export default function Admin() {
               {data.require_voting_code ? 'Codes required' : 'Codes optional'}
             </span>
             <span className="statLabel">
-              {data.codes?.redeemed ?? 0} used · {data.codes?.available ?? 0} available
+              {data.codes?.available ?? 0} available · {data.codes?.issued ?? 0} issued
             </span>
             <button className="btn ghost small" onClick={toggleCodeRequired} disabled={busy}>
               {data.require_voting_code ? 'Make codes optional' : 'Require codes'}
@@ -257,112 +352,38 @@ export default function Admin() {
           </div>
         </div>
 
-        <p className="dim small tallyNote">
-          Counts include submitted ballots only. Rankings and percentages use votes for the
-          nominees currently on the ballot.
-          {totals.all > totals.current && (
-            <>
-              {' '}
-              {votesLabel(totals.all - totals.current)} were cast for names or categories no
-              longer on the ballot. They are shown separately, as recorded, and are not
-              included in any ranking.
-            </>
+        <div className="adminTabs" role="tablist" aria-label="Dashboard sections" onKeyDown={onTabKey}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              ref={(el) => {
+                tabRefs.current[t.id] = el
+              }}
+              type="button"
+              role="tab"
+              id={`tab-${t.id}`}
+              aria-selected={tab === t.id}
+              aria-controls={`panel-${t.id}`}
+              tabIndex={tab === t.id ? 0 : -1}
+              className={`adminTab${tab === t.id ? ' on' : ''}`}
+              onClick={() => chooseTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="tabPanel"
+          role="tabpanel"
+          id={`panel-${tab}`}
+          aria-labelledby={`tab-${tab}`}
+        >
+          {tab === 'results' && <ResultsTab data={data} />}
+          {tab === 'codes' && (
+            <CodesTab data={data} adminRpc={adminRpc} reloadDashboard={load} />
           )}
-        </p>
-
-        {results.categories.map((c) => (
-          <div className="card tallyCard" key={c.id}>
-            <div className="tallyHead">
-              <h2>{c.name}</h2>
-              <span className="dim small">
-                {votesLabel(c.currentVotes)} for current nominees
-                {c.tie ? ' · tie' : ''}
-              </span>
-            </div>
-
-            {c.nominees.map((n) => (
-              <div className="bar" key={n.name}>
-                <div className="barTop">
-                  <span>
-                    {n.name}
-                    {n.leading && <span className="barLead">Leading</span>}
-                  </span>
-                  <span className="barVal">
-                    {n.votes} · {n.share.toFixed(0)}%
-                  </span>
-                </div>
-                <div className="barTrack">
-                  <div className="barFill" style={{ width: `${n.share}%` }} />
-                </div>
-              </div>
-            ))}
-
-            {c.historical.length > 0 && (
-              <div className="historical">
-                <p className="historicalHead">
-                  Names no longer on this ballot · {votesLabel(c.historicalVotes)}
-                </p>
-                <p className="dim small">
-                  As recorded. Not included in the ranking or percentages above.
-                </p>
-                <ul className="historicalList">
-                  {c.historical.map((h) => (
-                    <li key={h.name}>
-                      <span>{h.name}</span>
-                      <span className="barVal">{votesLabel(h.votes)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ))}
-
-        {results.removedCategories.length > 0 && (
-          <div className="card tallyCard historicalSection">
-            <div className="tallyHead">
-              <h2>Categories no longer on the ballot</h2>
-              <span className="dim small">{votesLabel(totals.inRemovedCategories)}</span>
-            </div>
-            <p className="dim small">
-              These categories were removed after voting started. Their votes are kept and shown
-              as recorded, by category ID. They are not ranked and are not part of any current
-              category.
-            </p>
-            {results.removedCategories.map((rc) => (
-              <div className="historical" key={rc.id}>
-                <p className="historicalHead">
-                  <code>{rc.id}</code> · {votesLabel(rc.votes)}
-                </p>
-                <ul className="historicalList">
-                  {rc.nominees.map((n) => (
-                    <li key={n.name}>
-                      <span>{n.name}</span>
-                      <span className="barVal">{votesLabel(n.votes)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="card">
-          <button className="linkBtn left" onClick={() => setShowVoters((s) => !s)}>
-            {showVoters ? 'Hide' : 'Show'} voter list ({(data.voters || []).length})
-          </button>
-          {showVoters && (
-            <ul className="voters">
-              {(data.voters || []).map((v, i) => (
-                <li key={i}>
-                  <span>{v.voter_name}</span>
-                  <span className="dim small">
-                    {v.voter_phone} · {v.completed_at ? 'submitted' : 'in progress'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {tab === 'activity' && <ActivityTab />}
         </div>
       </div>
     </div>
