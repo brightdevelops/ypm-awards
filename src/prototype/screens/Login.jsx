@@ -25,7 +25,7 @@ export default function Login({ go, onReturning }) {
       )
     }
     const normal = normalizeVoterCode(code)
-    if (!normal) return setError('Voter codes look like YPM-ABCD-2345. Check it and try again.')
+    if (!normal) return setError('Voter codes look like YPM-ABCD-2345-HJKM. Check it and try again.')
     if (fails >= MAX_TRIES) return setError('Too many attempts. Please wait 15 minutes and try again.')
 
     setBusy(true)
@@ -51,7 +51,7 @@ export default function Login({ go, onReturning }) {
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="YPM-ABCD-2345"
+            placeholder="YPM-ABCD-2345-HJKM"
             autoComplete="off"
             autoCapitalize="characters"
             spellCheck={false}

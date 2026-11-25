@@ -27,13 +27,16 @@ function filesUnder(dir) {
 
 describe('voter codes', () => {
   it('accept their own format in any case or spacing', () => {
-    assert.equal(normalizeVoterCode('ypm-test-2345'), 'YPM-TEST-2345')
-    assert.equal(normalizeVoterCode(' YPM TEST 2345 '), 'YPM-TEST-2345')
-    assert.equal(normalizeVoterCode('YPMTEST2345'), 'YPM-TEST-2345')
+    assert.equal(normalizeVoterCode('ypm-test-2345-hjkm'), 'YPM-TEST-2345-HJKM')
+    assert.equal(normalizeVoterCode(' YPM TEST 2345 HJKM '), 'YPM-TEST-2345-HJKM')
+    assert.equal(normalizeVoterCode('YPMTEST2345HJKM'), 'YPM-TEST-2345-HJKM')
   })
 
-  it('reject anything else', () => {
-    for (const bad of ['', 'YPM-TEST-234', 'XYZ-TEST-2345', 'YPM-TE0T-2345', 'YPM-TEST-1345', 'K7MQP-3XZRA']) {
+  it('reject anything else, including the old 8-character format', () => {
+    for (const bad of [
+      '', 'YPM-TEST-2345', 'YPM-TEST-2345-HJK', 'XYZ-TEST-2345-HJKM', 'YPM-TE0T-2345-HJKM',
+      'YPM-TEST-1345-HJKM', 'K7MQP-3XZRA',
+    ]) {
       assert.equal(normalizeVoterCode(bad), null, bad)
     }
   })
@@ -42,7 +45,17 @@ describe('voter codes', () => {
     assert.equal(normalizeVoterCode(DEMO_RETURNING.code), DEMO_RETURNING.code)
     assert.equal(normalizeVoterCode(DEMO_SUBMITTED.code), DEMO_SUBMITTED.code)
     for (let i = 0; i < 200; i++) assert.match(demoVoterCode(), VOTER_CODE_PATTERN)
-    assert.equal(demoVoterCode(() => 0), 'YPM-AAAA-AAAA')
+    assert.equal(demoVoterCode(() => 0), 'YPM-AAAA-AAAA-AAAA')
+  })
+
+  it('the browser and the database agree on the format', async () => {
+    const db = await freshDb()
+    const rows = (await db.query(`select ypm_private.new_voter_code() c from generate_series(1, 200)`)).rows
+    for (const { c } of rows) assert.equal(normalizeVoterCode(c), c)
+    for (const code of [DEMO_RETURNING.code, demoVoterCode()]) {
+      const r = await db.query(`select ypm_private.normalize_voter_code($1) n`, [code])
+      assert.equal(r.rows[0].n, code.replace(/-/g, ''))
+    }
   })
 
   it('never overlap with real voting codes, in either direction', async () => {

@@ -5,39 +5,42 @@
 // Nothing in this folder may be presented as working face recognition.
 
 // Voter login codes look different from admin-issued voting codes on purpose:
-//   voting code (migration 001): "K7MQP-3XZRA"     10 characters
-//   voter login code (planned):  "YPM-K7MQ-3XZR"   prefix + 8 characters
-// Normalised (letters and digits only) they are 10 vs 11 characters long and
+//   voting code (migration 001):     "K7MQP-3XZRA"         10 characters
+//   voter login code (migration 003): "YPM-K7MQ-3XZR-A2BC"  prefix + 12 characters
+// Normalised (letters and digits only) they are 10 vs 15 characters long and
 // a voter code always starts with "YPM", so one can never be mistaken for the
-// other.
+// other. Same rules as ypm_private.normalize_voter_code.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O, 1/I, as in 001
-export const VOTER_CODE_PATTERN = /^YPM-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/
+const GROUP = '[A-HJ-NP-Z2-9]{4}'
+export const VOTER_CODE_PATTERN = new RegExp(`^YPM-${GROUP}-${GROUP}-${GROUP}$`)
+
+const format = (body) => `YPM-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8)}`
 
 export function normalizeVoterCode(input) {
   const s = String(input ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  if (s.length !== 11 || !s.startsWith('YPM')) return null
+  if (s.length !== 15 || !s.startsWith('YPM')) return null
   const body = s.slice(3)
   if ([...body].some((ch) => !ALPHABET.includes(ch))) return null
-  return `YPM-${body.slice(0, 4)}-${body.slice(4)}`
+  return format(body)
 }
 
-// Fictional code for the prototype. The real one would come from the server.
+// Fictional code for the prototype. The real one comes from the server.
 export function demoVoterCode(random = Math.random) {
   let body = ''
-  for (let i = 0; i < 8; i++) body += ALPHABET[Math.floor(random() * ALPHABET.length)]
-  return `YPM-${body.slice(0, 4)}-${body.slice(4)}`
+  for (let i = 0; i < 12; i++) body += ALPHABET[Math.floor(random() * ALPHABET.length)]
+  return format(body)
 }
 
 // Fictional returning voter, so the login screen can be tried.
 export const DEMO_RETURNING = {
-  code: 'YPM-TEST-2345', // fictional; "O" isn't in the alphabet, so not "DEMO"
+  code: 'YPM-TEST-2345-HJKM', // fictional; "O" isn't in the alphabet, so not "DEMO"
   firstName: 'Ada',
   ballot: { answered: 7, total: 18 },
 }
 
 // Fictional voter whose ballot is already submitted: one ballot per voter.
 export const DEMO_SUBMITTED = {
-  code: 'YPM-VQTE-2345',
+  code: 'YPM-VQTE-2345-HJKM',
   firstName: 'Bayo',
   submitted: true,
 }

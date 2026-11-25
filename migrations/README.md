@@ -9,8 +9,15 @@ is one transaction: it applies fully or not at all.
 | `001_secure_voting.sql` | Closes the ballot-resume hole; voting codes; admin sessions; rate limits; audit log | `001_secure_voting.down.sql` |
 | `002_ballot_validation.sql` | Loads the ballot into the database; `save_vote` only accepts real nominees in their own category | `002_ballot_validation.down.sql` |
 | `ballot-sync.sql` | **Generated** (`npm run ballot:sql`). Brings the database ballot in line with `categories.js`. Re-run after every ballot edit. | — |
+| `003_voter_accounts.sql` | Registered voter accounts, voter login codes (keyed hashes, key in Supabase Vault), in-person registration, one ballot per voter. **Registration is off by default.** | `003_voter_accounts.down.sql` |
+| `dev/simulated_verification.sql` | **Development only.** Simulated verification for testing self-registration. Refuses to install or run outside a project marked as development. | Dropped by 003's undo |
 
-Undo in reverse order: 002's undo before 001's.
+Undo in reverse order: 003's undo, then 002's, then 001's.
+
+**After 003, re-run 003 whenever 001 or 002 is re-run.** 003 moves the
+original `begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private`
+and puts protective wrappers in their place. Re-running 001 or 002 replaces
+the wrappers with the unprotected versions until 003 is run again.
 
 **Always run on the development project first**, and run `npm test` before
 either. Nothing in this repo runs migrations for you.
@@ -141,3 +148,28 @@ Voting codes stay optional until you run
 `update public.settings set require_voting_code = true where id = 1;`.
 Switching them on mid-election means earlier voters were never asked for one.
 That's a fairness decision for the leaders, not a technical one.
+
+---
+
+## 003 — compatibility notes
+
+- **Nothing changes until someone acts.** With `registration_mode = 'off'`
+  and no voters registered, every existing function behaves exactly as
+  before (the full test suite runs with 003 applied).
+- **Needs Supabase Vault** (`supabase_vault` extension). 003 stops with a
+  clear message if Vault isn't there. It creates a random key named
+  `ypm_voter_code_pepper` once; nobody needs to see it. Replacing it makes
+  every voter code stop working.
+- **Registered numbers can't vote anonymously.** Once a number belongs to a
+  voter, `begin_ballot` / `start_ballot` answer `registered_voter` (old
+  pages show "Could not start"), and `save_vote` / `submit_ballot` refuse
+  that voter's ballot.
+- **`registration_mode = 'required'`** stops new anonymous ballots
+  (`registration_required`), including with a voting code. Unfinished
+  anonymous ballots can still be finished on the device that started them.
+- **Existing anonymous ballots are never linked by phone number.** An admin
+  attaches one in person with `admin_register_voter(..., p_link_existing_ballot => true)`.
+- **The simulator is development only.** Mark the dev project first:
+  `update ypm_private.deployment set environment = 'development';`
+  Production stays `production` (the default), where the simulator can't be
+  switched on, installed or run.

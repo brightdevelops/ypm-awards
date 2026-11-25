@@ -1,7 +1,7 @@
 import ScreenFrame from '../ScreenFrame.jsx'
 
-// The no-face-scan route: in person, using the existing admin-issued voting
-// codes (migration 001), which already work today.
+// The no-face-scan route: a youth leader registers the voter in person
+// (admin_register_voter, migration 003) and hands over their voter code.
 export default function Alternative({ go }) {
   return (
     <ScreenFrame title="Register without a face scan" lead="You can still vote. It just takes a quick chat in person.">
@@ -15,12 +15,14 @@ export default function Alternative({ go }) {
           <span>The same way they would for any church event.</span>
         </li>
         <li>
-          <strong>You get a voting code</strong>
-          <span>Enter it on the voting page under “I have a voting code”. It works once.</span>
+          <strong>You get your voter code</strong>
+          <span>The same kind of code as online registration. Use it to sign in and vote.</span>
         </li>
       </ol>
       <p className="dim small">
-        Choosing this doesn’t affect your vote in any way, and no face data is collected.
+        Choosing this doesn’t affect your vote in any way, and no face data is collected. If
+        you already started voting with your phone number, the youth leader can attach that
+        ballot to your account once they’ve confirmed it’s you.
       </p>
       <button type="button" className="btn primary" onClick={() => go('login')}>
         Got it

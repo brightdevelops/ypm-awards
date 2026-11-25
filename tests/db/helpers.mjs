@@ -11,6 +11,30 @@ export const DOWN_SQL = readFileSync(root('migrations/001_secure_voting.down.sql
 export const BALLOT_MIGRATION_SQL = readFileSync(root('migrations/002_ballot_validation.sql'), 'utf8')
 export const BALLOT_DOWN_SQL = readFileSync(root('migrations/002_ballot_validation.down.sql'), 'utf8')
 export const BALLOT_SYNC_SQL = readFileSync(root('migrations/ballot-sync.sql'), 'utf8')
+export const VOTER_MIGRATION_SQL = readFileSync(root('migrations/003_voter_accounts.sql'), 'utf8')
+export const VOTER_DOWN_SQL = readFileSync(root('migrations/003_voter_accounts.down.sql'), 'utf8')
+export const DEV_SIM_SQL = readFileSync(root('migrations/dev/simulated_verification.sql'), 'utf8')
+
+// A stand-in for Supabase Vault (the supabase_vault extension): same names,
+// no encryption. Real Vault encrypts secrets with a key held outside the
+// database.
+export const VAULT_STUB_SQL = `
+  create schema if not exists vault;
+  create table if not exists vault.secrets (
+    id uuid primary key default gen_random_uuid(),
+    name text unique, secret text not null, description text not null default ''
+  );
+  create or replace view vault.decrypted_secrets as
+    select id, name, secret as decrypted_secret, description from vault.secrets;
+  create or replace function vault.create_secret(
+    new_secret text, new_name text default null, new_description text default '',
+    new_key_id uuid default null
+  ) returns uuid language sql as $$
+    insert into vault.secrets (name, secret, description)
+    values (new_name, new_secret, new_description) returning id;
+  $$;
+  revoke all on schema vault from public;
+`
 
 // Keys from supabase-setup.sql's seed.
 export const LEADER_KEY = 'change-this-leader-key'
@@ -23,7 +47,8 @@ export const LEGACY = {
 }
 
 // migrate: false = production as it is today; '001' = after 001 only;
-// true = every migration plus the current ballot-sync.sql.
+// '002' = 001, 002 and ballot-sync.sql (before voter accounts);
+// true = every migration (including 003) plus the current ballot-sync.sql.
 export async function freshDb({ migrate = true } = {}) {
   const db = new PGlite()
   // Supabase's API roles, with Supabase's default grants: anon and
@@ -53,11 +78,13 @@ export async function freshDb({ migrate = true } = {}) {
   }
   await call(db, 'submit_ballot', { p_ballot_id: LEGACY.done.ballotId })
 
+  await db.exec(VAULT_STUB_SQL)
   if (migrate) await db.exec(MIGRATION_SQL)
-  if (migrate === true) {
+  if (migrate === true || migrate === '002') {
     await db.exec(BALLOT_MIGRATION_SQL)
     await db.exec(BALLOT_SYNC_SQL)
   }
+  if (migrate === true) await db.exec(VOTER_MIGRATION_SQL)
   return db
 }
 
