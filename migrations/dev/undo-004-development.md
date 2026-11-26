@@ -94,15 +94,17 @@ In your own PowerShell window, copy the committed file and check it:
 ```powershell
 cd C:\Users\Bright\Downloads\ypm-awards
 git status --short migrations
-(Get-FileHash migrations\004_voter_safeguards.down.sql -Algorithm SHA256).Hash
+git hash-object migrations\004_voter_safeguards.down.sql
 Get-Content -Raw -Encoding UTF8 migrations\004_voter_safeguards.down.sql | Set-Clipboard
 ```
 
 - `git status` prints nothing.
-- Hash: `4CBB783DC60EE42407EC571C71551462DD3D510CA156AA5893E348A91CB1CF16`
-  (the version that refuses to run while 005 is installed). Anything else:
-  stop. The earlier version (`FCDEB232…139F`, commit `17fd447`) did the
-  same undo without that check.
+- `git hash-object` prints `3b2a51cdbb808e9827b7251fe0afa12f40d7a058` (the
+  version that refuses to run while 005 is installed). Anything else: stop.
+  This ID is the same whether Git checked the file out with Windows or Unix
+  line endings; a SHA-256 of the file isn't (with LF endings it is
+  `4CBB783D…1CF16`). The earlier version (commit `17fd447`) did the same
+  undo without the 005 check.
 - **If 005 is installed, undo it first** (`005_simulated_provider.down.sql`);
   this file refuses otherwise and changes nothing.
 
