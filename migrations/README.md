@@ -335,8 +335,8 @@ unless 004's switch is on and `verification_provider = 'simulated'`.
 
 1. Back up as for 004 (`pg_dump` of `public` and `ypm_private`).
 2. In your own PowerShell window: `git status --short migrations` prints
-   nothing; `git hash-object migrations\005_simulated_provider.sql` matches
-   the ID in the report for this change.
+   nothing; `git hash-object migrations\005_simulated_provider.sql` prints
+   `3d3cad22c4850cdf24bab78c86ca934aa642e7c8`. Anything else: stop.
 3. Run `005_simulated_provider.sql` in a new blank tab on Development
    (address bar shows `vliytvqhjvuhulpvmuat`). Expected: "Success".
 4. Check (read-only):
