@@ -270,7 +270,12 @@ needing its own approval and procedure; it is not part of this document.
 
 ## Re-running 003 while 004 is installed
 
-**What would happen.** 003 recreates its public voter functions with
+**Now prevented.** 003 refuses to run while 004 is installed ("Migration
+004 is installed…") and changes nothing. The section below explains why,
+and the health checks catch the problem if an old copy of a file (saved
+before the guards were added) is ever run.
+
+**What would happen without the guard.** 003 recreates its public voter functions with
 `create or replace`. For 14 of them that **silently replaces 004's wrappers**
 with the unprotected 003 versions (no development-only check). For
 `admin_register_voter` and `admin_resolve_review`, whose arguments 004
@@ -279,9 +284,9 @@ is not affected, and 003's other guards (simulator only in development)
 still hold, but voter functions would work in any environment until 004 is
 re-run.
 
-**Rule:** don't re-run 003 on its own. If it must be re-run, run 004 again
-straight after it (004 is safe to re-run and replaces whatever is in
-`public`). This is in `migrations/README.md`.
+**Rule:** to re-run 003, undo 004 first, then run 003, then 004 again.
+Always run the committed files, never a saved snippet. This is in
+`migrations/README.md`.
 
 **Health check (read-only)**, worth running after any migration work:
 
@@ -301,13 +306,15 @@ select count(*) as unguarded
    and p.prosrc not like '%voter_accounts_enabled()%';
 ```
 
-Expected with 004 installed: `0`. Anything else means 003 was re-run after
-004: run 004 again.
+Expected with 004 installed: `0`. Anything else means an old copy of 003
+was run after 004: run 004 again (004 is safe to re-run and replaces
+whatever is in `public`).
 
-**The same risk one level down: 001 and 002.** Re-running
-`001_secure_voting.sql` or `002_ballot_validation.sql`, or running either
-undo file, while 003 is installed raises no error but replaces 003's
-protected `begin_ballot` or `save_vote`. Tested on a local copy: after
+**The same risk one level down: 001 and 002 (now prevented too).** The
+committed `001_secure_voting.sql`, `002_ballot_validation.sql` and their
+undo files refuse to run while 003 is installed. Without that guard (an old
+copy), they raise no error but replace 003's protected `begin_ballot` or
+`save_vote`. Tested on a local copy: after
 re-running 002 (or its undo), an anonymous `save_vote` on a **registered
 voter's ballot** is accepted, so anyone with that ballot's id can change
 their votes without signing in. After re-running 001, the voter's number is
@@ -331,21 +338,7 @@ select
    and p.proname in ('begin_ballot', 'save_vote', 'submit_ballot');
 ```
 
-A `false` means one of them was replaced: run 003 again, then 004.
+A `false` means one of them was replaced: undo 004, run 003, then run 004
+again.
 
-**Proposed fix (not made; needs approval).** Add a precondition to the top
-of `003_voter_accounts.sql` that refuses to run while 004 is installed:
-
-```sql
-do $$
-begin
-  if to_regprocedure('ypm_private.voter_accounts_enabled()') is not null then
-    raise exception 'Migration 004 is installed. Run 004_voter_safeguards.down.sql first, then 003, then 004 again.';
-  end if;
-end;
-$$;
-```
-
-It changes nothing on a database without 004 (Production today), and on
-Development it turns the silent replacement into an error before anything
-runs. Tests would cover both cases.
+**The guards (in place).** Each of 001, 002, their undo files and 003 checks, inside its own transaction and before changing anything, whether a newer migration is installed, and stops with a message naming it. On a database without 003 (Production today) the checks do nothing. `tests/db/rerun-guards.test.mjs` covers the refusals, a fresh install, re-runs, partial rollbacks and the full rollback chain.

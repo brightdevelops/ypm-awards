@@ -4,7 +4,7 @@ import { describe, it, before } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   freshDb, call, sql, login, issue, LEGACY,
-  MIGRATION_SQL, BALLOT_MIGRATION_SQL, VOTER_MIGRATION_SQL, VOTER_DOWN_SQL, DEV_SIM_SQL,
+  MIGRATION_SQL, DOWN_SQL, BALLOT_MIGRATION_SQL, BALLOT_DOWN_SQL, VOTER_MIGRATION_SQL, VOTER_DOWN_SQL, DEV_SIM_SQL,
 } from './helpers.mjs'
 
 const CODE_RE = /^YPM-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/
@@ -677,16 +677,17 @@ describe('rolling 003 back', () => {
     assert.equal((await call(db, 'begin_ballot', { p_name: 'x', p_phone: '08150000082' })).status, 'started')
   })
 
-  it('re-running 001 or 002 removes the protections, and re-running 003 restores them', async () => {
+  it('001, 002 and their undo files refuse to run over 003, leaving its protections in place', async () => {
     const db = await freshDb({ migrate: '003' })
     const admin = await login(db)
     await registerInPerson(db, admin, 'Rerun Test', '08150000090')
-    await db.exec(MIGRATION_SQL)
-    await db.exec(BALLOT_MIGRATION_SQL)
-    // Unprotected: the registered number gets an anonymous ballot.
-    assert.equal((await call(db, 'begin_ballot', { p_name: 'x', p_phone: '08150000090' })).status, 'started')
-    await sql(db, `delete from ballots where voter_phone = '08150000090'`)
-
+    for (const file of [MIGRATION_SQL, DOWN_SQL, BALLOT_MIGRATION_SQL, BALLOT_DOWN_SQL]) {
+      await assert.rejects(db.exec(file), /Migration 003 is installed/)
+      await db.exec('rollback') // the refusal aborts the file's transaction
+    }
+    // Still protected: the registered number can't get an anonymous ballot.
+    assert.equal((await call(db, 'begin_ballot', { p_name: 'x', p_phone: '08150000090' })).status, 'registered_voter')
+    // And 003 itself (no 004 here) can still be re-run.
     await db.exec(VOTER_MIGRATION_SQL)
     assert.equal((await call(db, 'begin_ballot', { p_name: 'x', p_phone: '08150000090' })).status, 'registered_voter')
   })

@@ -17,12 +17,14 @@ is one transaction: it applies fully or not at all.
 Undo in reverse order: 004's undo, then 003's, then 002's, then 001's.
 003's undo refuses to run while 004 is installed.
 
-**After 003, re-run 003 whenever 001 or 002 is re-run.** 003 moves the
-original `begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private`
-and puts protective wrappers in their place. Re-running 001 or 002 replaces
-the wrappers with the unprotected versions until 003 is run again.
-Likewise **re-run 004 whenever 003 is re-run**: 003 would put back its
-voter functions without 004's development-only switch.
+**Older files refuse to run over newer ones.** 003 moves the original
+`begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private` and puts
+protective wrappers in their place, so 001, 002 and their undo files stop
+with "Migration 003 is installed" instead of replacing the wrappers. 004
+wraps 003's voter functions, so 003 stops with "Migration 004 is installed".
+Nothing is changed when a file refuses. To re-run an older file, undo the
+newer ones first (004, then 003), then apply them again in order. Each file
+can still be re-run while it is the newest one installed.
 
 **Always run on the development project first**, and run `npm test` before
 either. Nothing in this repo runs migrations for you.
@@ -135,9 +137,7 @@ the migration.
      enter the code in the private window: it resumes with the picks
    - `/admin` and `/inventor`: sign in, refresh, sign out, close/reopen voting
    - turn codes on, then check a new number is asked for a code
-4. **Only on a project without 003.** Running 001, 002 or their undo files
-   over 003 silently removes its voting protections (see
-   `dev/undo-004-development.md`, "Re-running 003 while 004 is installed").
+4. **Only on a project without 003** (the files refuse to run over 003).
    Try the undo files (002's, then 001's), then apply both again, to check
    rolling back works.
 

@@ -1,6 +1,10 @@
 // The read-only health checks in migrations/dev/undo-004-development.md,
 // run exactly as written there, against databases where an older migration
 // was re-run on top of a newer one. Keeps the documented SQL honest.
+//
+// The committed files now refuse to run over a newer migration, so the
+// re-runs here use copies WITHOUT that guard: what an old saved snippet or a
+// copy taken before the guards were added would do.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -26,6 +30,13 @@ async function health(db) {
     submit: w.submit_ballot_ok,
   }
 }
+
+const withoutGuard = (file) => {
+  const lf = file.replace(/\r\n/g, '\n')
+  const out = lf.replace(/-- Refuses to run[\s\S]*?\nend;\n\$\$;\n/, '')
+  assert.notEqual(out.length, lf.length, 'guard found and removed')
+  return out
+}
 const HEALTHY = { unguarded: 0, begin: true, save: true, submit: true }
 
 describe('documented health checks for re-run migrations', () => {
@@ -34,28 +45,38 @@ describe('documented health checks for re-run migrations', () => {
     assert.ok(WRAPPERS, 'the voting-wrapper query')
   })
 
+  it('the committed files refuse instead (so these cases need an old copy)', async () => {
+    const db = await freshDb()
+    for (const [file, re] of [[MIGRATION_SQL, /003 is installed/], [BALLOT_MIGRATION_SQL, /003 is installed/],
+      [BALLOT_DOWN_SQL, /003 is installed/], [VOTER_MIGRATION_SQL, /004 is installed/]]) {
+      await assert.rejects(db.exec(file), re)
+      await db.exec('rollback')
+    }
+    assert.deepEqual(await health(db), HEALTHY)
+  })
+
   it('a healthy 003 + 004 database passes', async () => {
     assert.deepEqual(await health(await freshDb()), HEALTHY)
   })
 
-  it('re-running 002, or its undo, is caught (save_vote replaced)', async () => {
-    for (const rerun of [BALLOT_MIGRATION_SQL, BALLOT_DOWN_SQL]) {
+  it('re-running an old copy of 002, or of its undo, is caught (save_vote replaced)', async () => {
+    for (const rerun of [BALLOT_MIGRATION_SQL, BALLOT_DOWN_SQL].map(withoutGuard)) {
       const db = await freshDb()
       await db.exec(rerun)
       assert.deepEqual(await health(db), { ...HEALTHY, save: false })
     }
   })
 
-  it('re-running 001 is caught (begin_ballot replaced)', async () => {
+  it('re-running an old copy of 001 is caught (begin_ballot replaced)', async () => {
     const db = await freshDb()
-    await db.exec(MIGRATION_SQL)
+    await db.exec(withoutGuard(MIGRATION_SQL))
     assert.equal((await health(db)).begin, false)
   })
 
-  it('re-running 003 is caught (16 unguarded), and 003 then 004 repairs everything', async () => {
+  it('re-running an old copy of 003 is caught (16 unguarded), and running 004 again repairs it', async () => {
     const db = await freshDb()
-    await db.exec(BALLOT_MIGRATION_SQL)
-    await db.exec(VOTER_MIGRATION_SQL)
+    await db.exec(withoutGuard(BALLOT_MIGRATION_SQL))
+    await db.exec(withoutGuard(VOTER_MIGRATION_SQL))
     const h = await health(db)
     assert.equal(h.unguarded, 16)
     assert.equal(h.save, true, '003 puts its save_vote wrapper back')

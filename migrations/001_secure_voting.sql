@@ -24,6 +24,17 @@
 
 begin;
 
+-- Refuses to run over migration 003: this file would silently replace 003's
+-- protected voting functions (save_vote, begin_ballot) with unprotected ones.
+do $$
+begin
+  if to_regprocedure('ypm_private.save_vote_002(uuid,text,text)') is not null
+     or to_regprocedure('ypm_private.begin_ballot_001(text,text,text,uuid)') is not null then
+    raise exception 'Migration 003 is installed. Running this file would replace its protected voting functions. Undo 004 and 003 first (in that order), or don''t run this file.';
+  end if;
+end;
+$$;
+
 -- ---------- 0. Private schema for internal helpers ----------
 -- Not exposed by the Supabase API, and the public roles can't use it.
 

@@ -27,9 +27,10 @@
 --
 -- The original begin_ballot (001), save_vote (002) and submit_ballot
 -- (setup) are MOVED, unchanged, into ypm_private and wrapped by new public
--- functions with the same names, arguments and responses. If 001 or 002 is
--- ever re-run after this, re-run this file too: they would replace the
--- wrappers with the unprotected versions.
+-- functions with the same names, arguments and responses. 001, 002 and
+-- their undo files refuse to run while this is installed (they would
+-- replace the wrappers with the unprotected versions), and this file
+-- refuses to run while 004 is installed.
 --
 -- Requires: 001 and 002 applied, and Supabase Vault (the supabase_vault
 -- extension). Review before running. Development project first.
@@ -40,6 +41,16 @@
 -- ============================================================
 
 begin;
+
+-- Refuses to run while migration 004 is installed: it would silently
+-- replace 004's development-only wrappers with the unguarded 003 versions.
+do $$
+begin
+  if to_regprocedure('ypm_private.voter_accounts_enabled()') is not null then
+    raise exception 'Migration 004 is installed. Run 004_voter_safeguards.down.sql first, then 003, then 004 again.';
+  end if;
+end;
+$$;
 
 -- ---------- 0. Preconditions ----------
 

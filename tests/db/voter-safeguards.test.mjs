@@ -529,14 +529,21 @@ describe('004: undo and re-run', () => {
     assert.equal((await inPerson(db, s, 'Test Four', '08155500654')).status, 'ok')
   })
 
-  it('running 004 twice changes nothing; re-running 003 after 004 needs 004 again, which restores the switch', async () => {
+  it('running 004 twice changes nothing; 003 refuses while 004 is installed; undo 004, 003, 004 works', async () => {
     const db = await freshDb()
     const s = await login(db)
     await db.exec(SAFEGUARDS_SQL)
     assert.equal((await call(db, 'admin_voter_stats', { p_session: s })).status, 'disabled')
 
-    await db.exec(VOTER_MIGRATION_SQL) // 003 again: its unguarded functions come back
-    assert.equal((await call(db, 'admin_voter_stats', { p_session: s })).status, 'ok')
+    await assert.rejects(db.exec(VOTER_MIGRATION_SQL), /Migration 004 is installed/)
+    await db.exec('rollback') // the refusal aborts 003's transaction
+    for (const [fn, args] of Object.entries(VOTER_FUNCTIONS(s))) {
+      assert.deepEqual(await call(db, fn, args), { status: 'disabled' }, `${fn} still switched off`)
+    }
+
+    // The documented way to re-run 003.
+    await db.exec(SAFEGUARDS_DOWN_SQL)
+    await db.exec(VOTER_MIGRATION_SQL)
     await db.exec(SAFEGUARDS_SQL)
     for (const [fn, args] of Object.entries(VOTER_FUNCTIONS(s))) {
       assert.deepEqual(await call(db, fn, args), { status: 'disabled' }, fn)
