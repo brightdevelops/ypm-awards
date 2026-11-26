@@ -39,6 +39,10 @@ export default function Login({ go, api, onSignedIn, message }) {
       })
     }
     if (r.status === 'rate_limited') return setError('Too many attempts. Please wait 15 minutes and try again.')
+    if (r.status === 'disabled') {
+      // 004: voter accounts are switched off for this database. Not a wrong code.
+      return setError('Voter accounts aren’t available here. Vote on the main voting page instead.')
+    }
     return setError('We couldn’t find that voter code. Check it, or recover your code below.')
   }
 

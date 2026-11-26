@@ -159,6 +159,17 @@ export default function VoterPrototype({ api = voterApi }) {
           ],
         })
         return null
+      case 'consent_outdated':
+        // 004: the notice on this screen isn't the database's current one.
+        // Nothing was started.
+        showNotice({
+          title: 'The privacy notice has changed',
+          body: 'The notice you agreed to isn’t the current one, so your registration wasn’t started. Reload the page to read the current notice, then try again.',
+          note: 'Development: CONSENT_VERSION in simulator.js doesn’t match the current version in ypm_private.consent_versions.',
+          actions: [{ label: 'Register another way', onClick: () => go('alternative') }],
+        })
+        return null
+      case 'disabled': // 004: voter accounts are switched off for this database
       case 'registration_off':
       case 'verification_unavailable':
         showNotice({
