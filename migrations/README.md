@@ -258,12 +258,16 @@ select ypm_private.erase_voter('<voter id>', 'reason, e.g. deletion request');
 
 ### Undoing 004
 
+The full step-by-step procedure, with backup and verification, is in
+`dev/undo-004-development.md`. In short:
+
 1. **Export the consent records first** if they hold anything you need to
    keep (the undo deletes them; the audit log keeps the consent version of
-   every in-person registration and every restore):
+   every in-person registration made under 004, not of online ones). No
+   names or numbers are needed: `voter_id` links each record to the voter
+   row, which the undo keeps.
    ```sql
-   select c.*, v.full_name from public.voter_consents c
-     join public.voters v on v.id = c.voter_id;
+   select * from public.voter_consents order by recorded_at;
    ```
 2. Run `004_voter_safeguards.down.sql` (one transaction).
 3. Check the 003 functions are back:
