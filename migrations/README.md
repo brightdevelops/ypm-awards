@@ -135,7 +135,10 @@ the migration.
      enter the code in the private window: it resumes with the picks
    - `/admin` and `/inventor`: sign in, refresh, sign out, close/reopen voting
    - turn codes on, then check a new number is asked for a code
-4. Try the undo files (002's, then 001's), then apply both again, to check
+4. **Only on a project without 003.** Running 001, 002 or their undo files
+   over 003 silently removes its voting protections (see
+   `dev/undo-004-development.md`, "Re-running 003 while 004 is installed").
+   Try the undo files (002's, then 001's), then apply both again, to check
    rolling back works.
 
 ### 3. Production — only with your explicit go-ahead

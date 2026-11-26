@@ -304,6 +304,35 @@ select count(*) as unguarded
 Expected with 004 installed: `0`. Anything else means 003 was re-run after
 004: run 004 again.
 
+**The same risk one level down: 001 and 002.** Re-running
+`001_secure_voting.sql` or `002_ballot_validation.sql`, or running either
+undo file, while 003 is installed raises no error but replaces 003's
+protected `begin_ballot` or `save_vote`. Tested on a local copy: after
+re-running 002 (or its undo), an anonymous `save_vote` on a **registered
+voter's ballot** is accepted, so anyone with that ballot's id can change
+their votes without signing in. After re-running 001, the voter's number is
+no longer refused by `begin_ballot`. Don't run 001, 002 or their undo files
+on a database with 003 (Development today). README step "Development
+project" 4 predates 003: don't follow it there.
+
+This check, also read-only, must return three `true`s while 003 is
+installed:
+
+```sql
+select
+  coalesce(bool_and(p.prosrc like '%ypm_private.begin_ballot_001(%')
+    filter (where p.proname = 'begin_ballot'), false) as begin_ballot_ok,
+  coalesce(bool_and(p.prosrc like '%ypm_private.save_vote_002(%')
+    filter (where p.proname = 'save_vote'), false) as save_vote_ok,
+  coalesce(bool_and(p.prosrc like '%ypm_private.submit_ballot_000(%')
+    filter (where p.proname = 'submit_ballot'), false) as submit_ballot_ok
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('begin_ballot', 'save_vote', 'submit_ballot');
+```
+
+A `false` means one of them was replaced: run 003 again, then 004.
+
 **Proposed fix (not made; needs approval).** Add a precondition to the top
 of `003_voter_accounts.sql` that refuses to run while 004 is installed:
 
