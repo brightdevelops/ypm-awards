@@ -10,7 +10,7 @@
 // Chrome does.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { installDom, startVite, mount, React, sleep } from './dom-setup.mjs'
+import { installDom, startVite, mount, React, sleep, waitFor } from './dom-setup.mjs'
 
 let vite
 let Dialog
@@ -44,6 +44,14 @@ function strict(props) {
   return { view, closes: () => closes }
 }
 
+// Waits until the dialog has mounted and opened (a fixed sleep was flaky
+// when the whole suite runs in parallel).
+const opened = (view) =>
+  waitFor(() => {
+    const d = view.host.querySelector('dialog')
+    return d?.open ? d : null
+  }, 'dialog open')
+
 // What the browser does after dialog.close(): fire "close" (unless the test
 // DOM already did).
 async function closeNatively(el) {
@@ -55,8 +63,7 @@ describe('admin Dialog', () => {
   it('stays open when a stale close event arrives after StrictMode remounts it', async () => {
     const { view, closes } = strict({})
     try {
-      await sleep(20)
-      const el = view.host.querySelector('dialog')
+      const el = await opened(view)
       assert.equal(el.open, true, 'opened')
       // The event queued by StrictMode's unmount, delivered after the remount.
       el.dispatchEvent(new window.Event('close'))
@@ -71,8 +78,7 @@ describe('admin Dialog', () => {
   it('a real close still reaches the parent', async () => {
     const { view, closes } = strict({})
     try {
-      await sleep(20)
-      const el = view.host.querySelector('dialog')
+      const el = await opened(view)
       await closeNatively(el)
       if (closes() === 0) el.dispatchEvent(new window.Event('close'))
       await sleep(20)
@@ -85,8 +91,7 @@ describe('admin Dialog', () => {
   it('Escape closes a dismissable dialog', async () => {
     const { view, closes } = strict({})
     try {
-      await sleep(20)
-      const el = view.host.querySelector('dialog')
+      const el = await opened(view)
       el.dispatchEvent(new window.Event('cancel', { cancelable: true }))
       await sleep(20)
       assert.equal(closes(), 1)
@@ -98,8 +103,7 @@ describe('admin Dialog', () => {
   it('a dialog that must not be dismissed (show-once code) reopens and stays', async () => {
     const { view, closes } = strict({ canDismiss: false })
     try {
-      await sleep(20)
-      const el = view.host.querySelector('dialog')
+      const el = await opened(view)
       el.dispatchEvent(new window.Event('cancel', { cancelable: true }))
       await sleep(20)
       assert.equal(el.open, true, 'Escape ignored')
