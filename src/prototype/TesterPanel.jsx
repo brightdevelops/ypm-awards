@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { OUTCOMES } from './simulator.js'
+import { DELIVERIES, OUTCOMES } from './simulator.js'
 
 // DEVELOPMENT ONLY. An authorised tester signs in with a DEV admin key to
 // drive the simulated face check and decide reviews. The key is sent once
 // and never kept; the admin session lives only in memory (parent state).
 // Outcomes here are simulated choices, not biometric results.
-export default function TesterPanel({ api, adminSession, setAdminSession, outcome, setOutcome, onRestart }) {
+export default function TesterPanel({
+  api, adminSession, setAdminSession, outcome, setOutcome, delivery, setDelivery, onRestart,
+}) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
   const [msg, setMsg] = useState('')
@@ -118,6 +120,21 @@ export default function TesterPanel({ api, adminSession, setAdminSession, outcom
               onChange={() => setOutcome(id)}
             />
             {o.label}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset>
+        <legend>How the simulated provider delivers it</legend>
+        {Object.entries(DELIVERIES).map(([id, d]) => (
+          <label key={id}>
+            <input
+              type="radio"
+              name="delivery"
+              value={id}
+              checked={delivery === id}
+              onChange={() => setDelivery(id)}
+            />
+            {d.label}
           </label>
         ))}
       </fieldset>

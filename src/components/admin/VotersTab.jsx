@@ -10,6 +10,8 @@ import {
   BALLOT_LABELS,
   METHOD_LABELS,
   MODES,
+  REASON_LABELS,
+  RETENTION_DAYS,
   VOTER_PAGE_SIZE,
   createVoterAdmin,
   createdByLabel,
@@ -166,6 +168,7 @@ export default function VotersTab({ adminRpc, adminLabel }) {
           {s.consent_version && ` · Consent notice: ${s.consent_version}`}
           {s.adults_only && ' · Adults only'}
         </p>
+        <RetentionControl api={api} onDone={(message) => { setNotice(message); refreshAll() }} />
       </section>
 
       <ReviewQueue
@@ -221,14 +224,21 @@ export default function VotersTab({ adminRpc, adminLabel }) {
 
 function ReviewQueue({ api, reloadKey, onDecide }) {
   const [reviews, setReviews] = useState(null)
+  const [details, setDetails] = useState({}) // registration id -> 005 details
+  const [late, setLate] = useState([]) // 005: contradicting results after an account was created
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     setError('')
-    const r = await api.reviews()
+    const [r, d] = await Promise.all([api.reviews(), api.reviewDetails()])
     if (r.kind === 'unauthorized') return
     if (r.kind !== 'ok') return setError('Could not load the reviews. Refresh to try again.')
     setReviews(r.res.reviews || [])
+    // Extra detail only; without migration 005 the queue looks as before.
+    setDetails(
+      d.kind === 'ok' ? Object.fromEntries((d.res.reviews || []).map((x) => [x.registration_id, x])) : {},
+    )
+    setLate(d.kind === 'ok' ? d.res.late_conflicts || [] : [])
   }, [api])
 
   useEffect(() => {
@@ -243,6 +253,23 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
       {error && <p className="error" role="alert">{error}</p>}
       {!error && reviews === null && <p className="dim small">Loading…</p>}
       {reviews?.length === 0 && <p className="dim small">No registrations are waiting for review.</p>}
+      {late.length > 0 && (
+        <div className="callout warn" role="alert">
+          <p>
+            <strong>Check {late.length === 1 ? 'this account' : `these ${late.length} accounts`} in person.</strong>{' '}
+            The simulated provider sent a contradicting result after the account was created. The
+            account still works; revoke it if the person can’t be confirmed.
+          </p>
+          <ul className="lateConflicts">
+            {late.map((c) => (
+              <li key={c.registration_id}>
+                {c.full_name} ({c.phone}): {REASON_LABELS[c.reason_code] ?? c.outcome}, {formatDateTime(c.received_at)}
+                {c.account_status === 'revoked' && ' · already revoked'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {reviews?.length > 0 && (
         <ul className="reviewList">
           {reviews.map((r) => (
@@ -251,8 +278,19 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
                 <strong>{r.full_name}</strong> <span className="dim">{r.phone}</span>
                 <div className="dim tiny">
                   {formatDateTime(r.created_at)} ·{' '}
-                  {r.provider === 'simulated' ? 'Simulated “possible duplicate” (not biometric)' : r.provider}
+                  {details[r.id]?.reason_code
+                    ? REASON_LABELS[details[r.id].reason_code] ?? details[r.id].reason_code
+                    : r.provider === 'simulated'
+                      ? 'Simulated “possible duplicate” (not biometric)'
+                      : r.provider}
+                  {details[r.id]?.deliveries > 0 &&
+                    ` · ${details[r.id].deliveries} provider ${details[r.id].deliveries === 1 ? 'result' : 'results'}`}
                 </div>
+                {details[r.id]?.conflicts > 0 && (
+                  <div className="warnText tiny">
+                    The simulated provider sent contradicting results. Check this person in person before deciding.
+                  </div>
+                )}
               </div>
               <div className="adminActions">
                 <button type="button" className="btn ghost small" onClick={() => onDecide(r, 'reject')}>
@@ -417,5 +455,43 @@ function VoterList({ api, reloadKey, onReissue, onRevoke, onRestore }) {
         </nav>
       )}
     </section>
+  )
+}
+
+// Migration 005: verification records are deleted 30 days after they
+// finish. It also happens automatically when a simulated check starts.
+// Hidden on a database without 005.
+function RetentionControl({ api, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [missing, setMissing] = useState(false)
+  const [error, setError] = useState('')
+
+  async function purge() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    const r = await api.purgeVerificationRecords()
+    setBusy(false)
+    if (r.kind === 'unauthorized') return
+    if (r.kind === 'network' && r.missing) return setMissing(true)
+    if (r.kind !== 'ok') return setError('Couldn’t clean up. Nothing was deleted, or the result is unknown: try again.')
+    const n = r.res.registrations + r.res.events + r.res.outbox
+    onDone(
+      n === 0
+        ? `Nothing older than ${RETENTION_DAYS} days to delete.`
+        : `Deleted ${r.res.registrations} finished registration(s) and ${r.res.events + r.res.outbox} provider record(s) older than ${RETENTION_DAYS} days. Ballots, votes and accounts are kept.`,
+    )
+  }
+
+  if (missing) return null
+  return (
+    <p className="dim tiny">
+      Verification records are deleted {RETENTION_DAYS} days after they finish (never ballots, votes,
+      accounts or consent records).{' '}
+      <button type="button" className="linkBtn" onClick={purge} disabled={busy}>
+        {busy ? 'Cleaning up…' : 'Clean up now'}
+      </button>
+      {error && <span className="error" role="alert"> {error}</span>}
+    </p>
   )
 }

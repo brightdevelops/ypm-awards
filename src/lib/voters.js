@@ -84,6 +84,12 @@ export function createVoterAdmin(adminRpc) {
         p_reason: reason.trim(),
       }),
     setMode: (mode) => once('mode', 'admin_set_registration_mode', { p_mode: mode }),
+
+    // Migration 005 (simulated provider). On a database without it these
+    // answer { kind: 'network', missing: true }, and the tab carries on
+    // without the extra detail.
+    reviewDetails: () => adminRpc('admin_review_details'),
+    purgeVerificationRecords: () => once('purge', 'admin_purge_verification_records'),
   }
 }
 
@@ -112,6 +118,18 @@ export const BALLOT_LABELS = {
   in_progress: 'In progress',
   submitted: 'Submitted',
 }
+
+// Why a registration is waiting for review (migration 005). Simulated,
+// never biometric.
+export const REASON_LABELS = {
+  possible_duplicate: 'Simulated “possible duplicate” (not biometric)',
+  conflicting_results: 'Conflicting simulated results: decide in person',
+  liveness_failed: 'Simulated liveness check failed',
+  poor_capture: 'Simulated poor capture',
+  provider_timeout: 'Simulated provider timed out',
+}
+
+export const RETENTION_DAYS = 30
 
 export const METHOD_LABELS = {
   in_person: 'In person',

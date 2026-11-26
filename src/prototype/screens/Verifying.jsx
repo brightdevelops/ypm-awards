@@ -2,18 +2,28 @@ import { useEffect, useRef, useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
 import { VERIFY_STEPS, after } from '../simulator.js'
 
-// Shows progress while `task` (simulate + status check on the server) runs,
-// then hands its result to onResult. The steps are display only: the
-// outcome comes from the server's registration status.
+// Shows progress while `task` (simulated provider + status checks on the
+// server) runs, then hands its result to onResult. The steps are display
+// only: the outcome comes from the server's registration status. If the
+// result is slow, says so; leaving the screen stops the checks.
 export default function Verifying({ task, onResult }) {
   const [step, setStep] = useState(0)
   const [result, setResult] = useState(null)
+  const [slow, setSlow] = useState(false)
   const started = useRef(false)
+  const gone = useRef(false)
 
   useEffect(() => {
-    if (started.current) return
-    started.current = true
-    task().then(setResult)
+    gone.current = false
+    if (!started.current) {
+      started.current = true
+      task({ onSlow: () => !gone.current && setSlow(true), isCancelled: () => gone.current }).then(
+        (r) => !gone.current && setResult(r),
+      )
+    }
+    return () => {
+      gone.current = true
+    }
   }, [task])
 
   useEffect(() => {
@@ -41,6 +51,11 @@ export default function Verifying({ task, onResult }) {
           )
         })}
       </ol>
+      {slow && !result && (
+        <p className="small" role="status">
+          Still checking. This can take up to a minute. Please keep this page open.
+        </p>
+      )}
       <p className="fineprint">Development: the result is simulated. No face comparison takes place.</p>
     </ScreenFrame>
   )

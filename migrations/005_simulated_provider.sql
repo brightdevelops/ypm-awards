@@ -183,6 +183,14 @@ begin
     v_result := 'conflict_review';
   else
     v_result := 'conflict_ignored';
+    -- A "duplicate" or "failed" that arrives after the account was created
+    -- can't undo it, but a person must look: logged, and listed for admins
+    -- by admin_review_details (late_conflicts).
+    if v_reg.status = 'claimed' and p_outcome in ('review', 'failed') then
+      perform ypm_private.audit('simulated_provider', 'verification_conflict_after_claim', jsonb_build_object(
+        'registration_id', v_reg.id, 'voter_id', v_reg.voter_id,
+        'outcome', p_outcome, 'reason_code', p_reason_code));
+    end if;
   end if;
 
   insert into ypm_private.verification_events (registration_id, delivery_id, outcome, reason_code, result)
@@ -441,15 +449,20 @@ begin
 end;
 $$;
 
--- Admin: why each waiting review is waiting, and its delivery history.
--- Outcomes, reason codes and times only.
+-- Admin: why each waiting review is waiting, and its delivery history
+-- (outcomes, reason codes and times only); and late conflicts: accounts
+-- that received a "duplicate" or "failed" result after they were created,
+-- which a person should check.
 -- Statuses: ok (reviews: [{registration_id, reason_code, deliveries,
---   conflicts, history: [{result, outcome, reason_code, received_at}]}])
+--   conflicts, history: [{result, outcome, reason_code, received_at}]}],
+--   late_conflicts: [{registration_id, voter_id, full_name, phone (masked),
+--   account_status, outcome, reason_code, received_at}])
 --   | disabled | unauthorized
 create or replace function public.admin_review_details(p_session text)
 returns json language plpgsql security definer set search_path = public as $$
 declare
-  v_out json;
+  v_out  json;
+  v_late json;
 begin
   if not ypm_private.voter_accounts_enabled() then
     return ypm_private.disabled_reply();
@@ -470,7 +483,17 @@ begin
       left join ypm_private.provider_sessions s on s.registration_id = r.id
      where r.status = 'review'
   ) x);
-  return json_build_object('status', 'ok', 'reviews', v_out);
+  v_late := (select coalesce(json_agg(y order by y.received_at), '[]'::json) from (
+    select distinct on (r.id) r.id as registration_id, v.id as voter_id, v.full_name,
+           ypm_private.mask_phone(v.phone) as phone, v.status as account_status,
+           e.outcome, e.reason_code, e.received_at
+      from ypm_private.verification_events e
+      join voter_registrations r on r.id = e.registration_id
+      join voters v on v.id = r.voter_id
+     where e.result = 'conflict_ignored' and e.outcome in ('review', 'failed') and r.status = 'claimed'
+     order by r.id, e.received_at desc
+  ) y);
+  return json_build_object('status', 'ok', 'reviews', v_out, 'late_conflicts', v_late);
 end;
 $$;
 

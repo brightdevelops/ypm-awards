@@ -300,3 +300,52 @@ body, grant, trigger, column and row exactly as 003 had them.
   requests at a barrier, checks they are all queued at once, releases them
   together, and checks there is still exactly one account / ballot / valid
   code. Skips if PostgreSQL's programs aren't installed (`YPM_PG_BIN`).
+
+---
+
+## 005 — simulated verification provider (Phase 4, development only)
+
+**No biometric data.** A tester chooses each outcome; the simulator signs
+it and the result arrives later through `dev_provider_callback`, the way a
+real provider's webhook would. Every public function answers `disabled`
+unless 004's switch is on and `verification_provider = 'simulated'`.
+
+- **Untrusted callback.** Nothing changes unless the HMAC-SHA-256
+  signature (key `ypm_sim_provider_key` in Vault, created only on a
+  development project) is valid, the delivery was issued within the last
+  10 minutes, and it is well formed. Replies say only accepted or rejected.
+- **Result rules.** Idempotent per delivery; older results are ignored
+  (`stale`); a decision is never upgraded; a contradicting result for an
+  approved, unclaimed registration sends it to review; one that arrives
+  after the account was created is logged and shown to admins as a late
+  conflict, and the account keeps working until a person decides.
+- **What is stored.** Outcomes, short reason codes, provider references and
+  times (`ypm_private.provider_sessions`, `verification_events`,
+  `sim_outbox`). No names, numbers, images, templates or scores; the tests
+  check the columns.
+- **Retention: 30 days.** Finished verification records (claimed, rejected,
+  failed or expired registrations, their provider records, and the
+  delivery log) are deleted 30 days after they finish: whenever a check
+  starts, or with "Clean up now" on the dashboard. Ballots, votes, voter
+  accounts, consent records, the audit log and waiting reviews are never
+  deleted. (003 already removes abandoned pending registrations after a
+  day.)
+
+### Applying 005 to Development (needs your go-ahead)
+
+1. Back up as for 004 (`pg_dump` of `public` and `ypm_private`).
+2. In your own PowerShell window: `git status --short migrations` prints
+   nothing; `git hash-object migrations\005_simulated_provider.sql` matches
+   the ID in the report for this change.
+3. Run `005_simulated_provider.sql` in a new blank tab on Development
+   (address bar shows `vliytvqhjvuhulpvmuat`). Expected: "Success".
+4. Check (read-only):
+   ```sql
+   select to_regclass('ypm_private.provider_sessions') is not null as installed,
+          exists (select 1 from vault.decrypted_secrets
+                   where name = 'ypm_sim_provider_key') as key_present;
+   ```
+   Expect `true, true`.
+
+Undo: `005_simulated_provider.down.sql` (keeps every registration, account,
+ballot and vote; leaves the Vault key, which a reinstall reuses).

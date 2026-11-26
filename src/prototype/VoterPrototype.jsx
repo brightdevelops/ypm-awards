@@ -3,7 +3,8 @@ import './prototype.css'
 import { Progress } from './ScreenFrame.jsx'
 import { voterApi, configured } from './connection.js'
 import { createSessionStore } from './voterSession.js'
-import { CONSENT_VERSION, OUTCOMES, maskPhone } from './simulator.js'
+import { CONSENT_VERSION, DELIVERIES, OUTCOMES, VERIFY_TIMING, maskPhone } from './simulator.js'
+import { runProviderCheck } from './providerRelay.js'
 import { BALLOT } from '../data/categories.js'
 import TesterPanel from './TesterPanel.jsx'
 import Login from './screens/Login.jsx'
@@ -26,12 +27,13 @@ import Notice from './screens/Notice.jsx'
 
 const PROGRESS = { register: 0, consent: 1, camera: 2, verifying: 2, success: 3 }
 
-export default function VoterPrototype({ api = voterApi }) {
+export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING }) {
   const store = useMemo(() => createSessionStore(), [])
   const [screen, setScreen] = useState('loading')
   const [notice, setNotice] = useState(null)
   const [details, setDetails] = useState({ name: '', phone: '' })
   const [outcome, setOutcome] = useState('approved')
+  const [delivery, setDelivery] = useState('normal')
   const [adminSession, setAdminSession] = useState(null) // memory only
   const [voterCode, setVoterCode] = useState(null) // show-once, memory only
   const [voter, setVoter] = useState(null) // { session, expiresAt, firstName }
@@ -315,19 +317,36 @@ export default function VoterPrototype({ api = voterApi }) {
     return checkRegistration() // invalid / expired: let the status explain
   }
 
-  const verifyTask = useCallback(async () => {
-    const r = regRef.current
-    const o = OUTCOMES[outcome]
-    if (!r) return { type: 'missing' }
-    if (!adminSession) return { type: 'tester_needed' }
-    const sim = await api.simulate(adminSession, r.token, o.server)
-    if (sim.kind === 'unauthorized') return { type: 'tester_needed' }
-    if (sim.kind === 'answer' && sim.status === 'disabled') return { type: 'disabled' }
-    // Whatever the simulator replied, the registration status is the truth.
-    const st = await api.status(r.token)
-    if (st.kind !== 'answer') return { type: 'unknown' }
-    return { type: 'status', status: st.status, lostClaim: Boolean(o.lostClaim) }
-  }, [api, adminSession, outcome])
+  // Runs while the Verifying screen shows. With a provider delivery
+  // (Phase 4), the result arrives later: start the simulated provider, then
+  // relay its deliveries and poll the registration status with back-off.
+  // The status is always the truth, whatever any single reply said.
+  const verifyTask = useCallback(
+    async ({ onSlow, isCancelled = () => false } = {}) => {
+      const r = regRef.current
+      const o = OUTCOMES[outcome]
+      const d = DELIVERIES[delivery]
+      if (!r) return { type: 'missing' }
+      if (!adminSession) return { type: 'tester_needed' }
+      const lostClaim = Boolean(o.lostClaim)
+
+      if (!d.scenario) {
+        const sim = await api.simulate(adminSession, r.token, o.server)
+        if (sim.kind === 'unauthorized') return { type: 'tester_needed' }
+        if (sim.kind === 'answer' && sim.status === 'disabled') return { type: 'disabled' }
+        const st = await api.status(r.token)
+        if (st.kind !== 'answer') return { type: 'unknown' }
+        return { type: 'status', status: st.status, lostClaim }
+      }
+
+      const res = await runProviderCheck({
+        api, adminSession, token: r.token, outcome: o.server, reasonCode: o.reason,
+        delivery: d, timing, onSlow, isCancelled,
+      })
+      return res.type === 'status' ? { ...res, lostClaim } : res
+    },
+    [api, adminSession, outcome, delivery, timing],
+  )
 
   const verified = useCallback(
     (result) => {
@@ -344,6 +363,15 @@ export default function VoterPrototype({ api = voterApi }) {
           title: 'Simulated verification is off',
           body: 'This database isn’t set up for simulated verification. Follow the development setup steps.',
           actions: [{ label: 'Back to the face check', onClick: () => go('camera') }],
+        })
+      }
+      if (result.type === 'cancelled') return null
+      if (result.type === 'still_pending') {
+        return showNotice({
+          title: 'Still checking',
+          body: 'The face check hasn’t finished yet. Your registration is saved, so nothing is lost. Check again in a minute.',
+          note: 'Development: the simulated provider’s result hasn’t arrived (or was refused).',
+          actions: [{ label: 'Check again', onClick: () => go('verifying') }],
         })
       }
       if (result.type === 'unknown') {
@@ -504,6 +532,8 @@ export default function VoterPrototype({ api = voterApi }) {
         setAdminSession={setAdminSession}
         outcome={outcome}
         setOutcome={setOutcome}
+        delivery={delivery}
+        setDelivery={setDelivery}
         onRestart={restart}
       />
     </div>

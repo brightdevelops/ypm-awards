@@ -1,6 +1,14 @@
-# Phase 4 plan: simulated biometric integration (development only)
+# Phase 4: simulated biometric integration (development only)
 
-**Status: proposal, nothing built.** Synthetic data only. No camera, no face
+**Status: 4.1–4.5 implemented in migration 005 and the development
+screens; not applied to any database yet.** Decisions (approved 26 Nov
+2026): re-run guards first (done), 30-day retention, no Edge Function,
+consent notice stays a draft (`draft-2026-11-dev`) throughout.
+
+Original plan below, with what changed while building it in
+"Implementation notes" at the end.
+
+**Original status: proposal.** Synthetic data only. No camera, no face
 images, no templates, no real vendor. Each step below is development-only
 and enforced by the database (004's switch), like Phase 3.
 
@@ -83,3 +91,23 @@ browser), development-only enforcement tests, and the full suite + build.
 Any real camera access, real face data, a real vendor or vendor account,
 under-18 registration, production use, and any legal or privacy sign-off
 (a data protection impact assessment is required before a real provider).
+
+## Implementation notes
+
+- **Provider value unchanged.** The provider is still `simulated`; the
+  asynchronous path is a new set of functions (`dev_provider_start`,
+  `dev_provider_outbox`, `dev_provider_callback`) beside 003's synchronous
+  `dev_simulate_verification`, which stays as the "Instant" option. So no
+  003 constraint or function changed.
+- **Provider records live in `ypm_private`** (`provider_sessions`,
+  `verification_events`, `sim_outbox`), not as new columns on
+  `voter_registrations`, so 005 adds objects only and undoes cleanly.
+- **Late conflicts.** Found while testing: if the voter claims before a
+  contradicting result arrives, the account already exists. Such results
+  are now audited and listed for admins ("Check this account in person");
+  they never undo an account automatically.
+- **Retention** runs when a check starts and on demand from the dashboard;
+  no scheduler was added (that would be new infrastructure).
+- **Voter page.** Polls with back-off (1 s to 5 s), says "still checking"
+  after 15 s, stops waiting after 60 s with a notice that nothing is lost;
+  "Check again" resumes the same check.
