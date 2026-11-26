@@ -29,7 +29,14 @@ export default function Dialog({ title, description, onClose, canDismiss = true,
     // Some browsers close a dialog on a repeated Escape even when "cancel" was
     // prevented. Reopen one that mustn't be dismissed; otherwise treat it as
     // a normal close so the parent's state follows.
+    //
+    // A "close" event arrives after close() has returned, so one can be left
+    // over from an earlier close() and turn up after the dialog was opened
+    // again: React's StrictMode (development) mounts, unmounts and remounts
+    // every component, and the unmount closes the dialog. Such an event is
+    // stale; the dialog is open, so ignore it.
     function onNativeClose() {
+      if (el.open) return
       if (dismissRef.current) closeRef.current()
       else el.showModal()
     }
