@@ -36,7 +36,7 @@ codes, registrations, sessions, ballots, votes, settings, the audit log.
 
 | Lost | Effect |
 |---|---|
-| `public.voter_consents` (all consent records) | Export them first (step U2). The audit log still has the consent version of each in-person registration made under 004 (`voter_registered_in_person`), but not of online registrations. |
+| `public.voter_consents` (all consent records) | The consent itself survives: every record is copied from the voter row's `consent_version`, `consent_at`, `adult_confirmed`, `method` and `created_by` (003 columns, kept by the undo), for online and in-person accounts alike. What is lost is the record-keeping around it: each record's `id`, `recorded_at` and `recorded_from`. Reinstalling 004 rebuilds the records from the voter rows (`recorded_from` = `migration_004_backfill`). Export them first anyway (step U2) as the record of what existed. |
 | `ypm_private.consent_versions` | The draft version is recreated if 004 is installed again. |
 | `ypm_private.retired_voter_codes` | Codes replaced by reissue or restore no longer match any account, so they still don't work. Only the guarantee that a new random code can never equal an old one is lost (the chance is negligible: about 60 random bits). |
 | `restored_at`, `restored_by`, `restore_reason` on voters | The audit log keeps every restore (`voter_restored`: who, when, the reason and the earlier revocation). |

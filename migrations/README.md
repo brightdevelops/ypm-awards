@@ -261,11 +261,12 @@ select ypm_private.erase_voter('<voter id>', 'reason, e.g. deletion request');
 The full step-by-step procedure, with backup and verification, is in
 `dev/undo-004-development.md`. In short:
 
-1. **Export the consent records first** if they hold anything you need to
-   keep (the undo deletes them; the audit log keeps the consent version of
-   every in-person registration made under 004, not of online ones). No
-   names or numbers are needed: `voter_id` links each record to the voter
-   row, which the undo keeps.
+1. **Export the consent records first** as the record of what existed. The
+   undo deletes them, but the consent itself stays on each voter row
+   (`consent_version`, `consent_at`, `adult_confirmed`, from 003), which the
+   records were copied from; only `recorded_at` and `recorded_from` are
+   lost. No names or numbers are needed: `voter_id` links each record to
+   the voter row, which the undo keeps.
    ```sql
    select * from public.voter_consents order by recorded_at;
    ```
