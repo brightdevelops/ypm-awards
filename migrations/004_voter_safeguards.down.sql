@@ -20,6 +20,16 @@
 
 begin;
 
+-- Refuses to run while migration 005 is installed: its functions depend on
+-- the switch removed below.
+do $$
+begin
+  if to_regclass('ypm_private.provider_sessions') is not null then
+    raise exception 'Migration 005 is installed. Run 005_simulated_provider.down.sql first.';
+  end if;
+end;
+$$;
+
 -- New and changed public functions.
 drop function if exists public.admin_restore_voter(text, uuid, text);
 drop function if exists public.admin_register_voter(text, text, text, text, boolean, boolean);

@@ -99,8 +99,12 @@ Get-Content -Raw -Encoding UTF8 migrations\004_voter_safeguards.down.sql | Set-C
 ```
 
 - `git status` prints nothing.
-- Hash: `FCDEB23288D504AC480F5D5405A43AB242E5FACC9791FEF2ED4874462B08139F`
-  (the version committed in `17fd447`). Anything else: stop.
+- Hash: `4CBB783DC60EE42407EC571C71551462DD3D510CA156AA5893E348A91CB1CF16`
+  (the version that refuses to run while 005 is installed). Anything else:
+  stop. The earlier version (`FCDEB232…139F`, commit `17fd447`) did the
+  same undo without that check.
+- **If 005 is installed, undo it first** (`005_simulated_provider.down.sql`);
+  this file refuses otherwise and changes nothing.
 
 Paste into a new blank tab on Development, check it starts with
 `-- YPM Youth Awards — undo Migration 004.` and ends with `commit;`, nothing

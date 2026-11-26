@@ -10,12 +10,14 @@ is one transaction: it applies fully or not at all.
 | `002_ballot_validation.sql` | Loads the ballot into the database; `save_vote` only accepts real nominees in their own category | `002_ballot_validation.down.sql` |
 | `ballot-sync.sql` | **Generated** (`npm run ballot:sql`). Brings the database ballot in line with `categories.js`. Re-run after every ballot edit. | — |
 | `003_voter_accounts.sql` | Registered voter accounts, voter login codes (keyed hashes, key in Supabase Vault), in-person registration, one ballot per voter. **Registration is off by default.** | `003_voter_accounts.down.sql` |
-| `004_voter_safeguards.sql` | Voter accounts **development only, enforced by the database**; restoring revoked voters with a new code (old codes retired for good); linking a ballot when approving a review; consent records with version tracking; `erase_voter` for deletion. **Not applied anywhere yet.** | `004_voter_safeguards.down.sql` |
+| `004_voter_safeguards.sql` | Voter accounts **development only, enforced by the database**; restoring revoked voters with a new code (old codes retired for good); linking a ballot when approving a review; consent records with version tracking; `erase_voter` for deletion. **Installed on Development** (seen through the public API on 26 Nov 2026: 004-only functions and its consent check answer); not on Production. | `004_voter_safeguards.down.sql` (refuses while 005 is installed) |
+| `005_simulated_provider.sql` | **Development only, not applied anywhere yet.** Simulated verification provider with asynchronous, signed results (HMAC, key in Vault): replay, duplicate, out-of-order and conflict handling; review reasons for admins; 30-day retention of verification records (never ballots, votes, accounts or consent). No biometric data. Needs 004. | `005_simulated_provider.down.sql` |
 | `dev/simulated_verification.sql` | **Development only.** Simulated verification for testing self-registration. Refuses to install or run outside a project marked as development. | Dropped by 003's undo |
 | `dev/revoke-synthetic-test-credentials.md` | **Development only, not run yet.** Step-by-step SQL that revokes the synthetic test voters (`08155500xxx`), ends their sign-ins and closes their open registrations. Deletes nothing; every write checks the project is marked as development. | Not needed (with 004, a revoked account can be restored with a new code) |
 
-Undo in reverse order: 004's undo, then 003's, then 002's, then 001's.
-003's undo refuses to run while 004 is installed.
+Undo in reverse order: 005's undo, then 004's, then 003's, then 002's, then
+001's. 004's undo refuses to run while 005 is installed, and 003's while 004
+is installed.
 
 **Older files refuse to run over newer ones.** 003 moves the original
 `begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private` and puts
