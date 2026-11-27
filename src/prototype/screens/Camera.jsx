@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 import { LIVENESS_PROMPTS, after } from '../simulator.js'
 
 const TIPS = [

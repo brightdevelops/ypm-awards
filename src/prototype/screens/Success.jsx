@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 
 // Show-once voter code. It lives only in memory and is cleared as soon as
 // this screen is left. Only a keyed hash of it exists on the server.

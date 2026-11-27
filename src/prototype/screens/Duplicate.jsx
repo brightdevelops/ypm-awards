@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 
 // The registration is waiting for an admin review. In development this
 // result was chosen by the tester: no faces were compared.

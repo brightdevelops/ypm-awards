@@ -24,8 +24,11 @@ export { isMissingFunction } from './rpcErrors.js'
 // "disabled" unless the database is marked as development; and
 // verification_provider can only be 'simulated' on a development database
 // (003), so a production database never shows 'simulated' either.
+// isDev: a development build. Only there does the simulated face-check
+// provider alone open the tab; in a production build the tab opens only
+// when the database's in-person functions answer (migration 006, switched
+// on by 007 in Production).
 export function voterAccess(isDev, stats) {
-  if (!isDev) return 'hidden'
   if (!stats) return 'loading'
   if (stats.kind === 'network') return stats.missing ? 'not_installed' : 'unreachable'
   if (stats.kind === 'unexpected' && stats.res?.status === 'disabled') return 'not_development'
@@ -33,8 +36,9 @@ export function voterAccess(isDev, stats) {
   // Without the simulated provider, the tab is still needed for in-person
   // requests (migration 006). stats.inPerson is true only if 006's function
   // answered, which it does only on a development database.
-  if (stats.res.verification_provider !== 'simulated' && stats.inPerson !== true) return 'not_development'
-  return 'ready'
+  if (stats.inPerson === true) return 'ready'
+  if (isDev && stats.res.verification_provider === 'simulated') return 'ready'
+  return 'not_development'
 }
 
 export function createVoterAdmin(adminRpc) {

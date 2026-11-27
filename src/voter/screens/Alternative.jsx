@@ -1,14 +1,23 @@
 import { useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
 import { isValidPhone, normalizePhone } from '../../lib/phone.js'
-import { TEST_PHONE_RANGE, isTestPhone } from '../simulator.js'
 
 // The no-face-scan route (Phase 5.1, migration 006): the voter asks to be
 // confirmed by a youth leader and gets a reference to show them. The leader
 // confirms them in person and hands over the voter code. Same account, same
 // ballot as online registration. Works even when no face check is set up.
 // onRequest({ name, phone }) returns a message to show here, or null.
-export default function Alternative({ go, details, onRequest }) {
+//   phoneRule  optional { test(normalized), message, hint }: the development
+//              prototype accepts synthetic numbers only
+//   consent    { label, notice }: what the voter agrees to (production: the
+//              published notice; prototype: the draft)
+//   onBack     optional: a "back" link (the prototype's face check option)
+const DRAFT_CONSENT = {
+  label: 'I agree to YPM keeping my name and phone number to register me to vote (draft notice).',
+  notice: null,
+}
+
+export default function Alternative({ go, details, onRequest, phoneRule = null, consent = DRAFT_CONSENT, onBack = null }) {
   const [name, setName] = useState(details?.name ?? '')
   const [phone, setPhone] = useState(details?.phone ?? '')
   const [age, setAge] = useState('')
@@ -21,9 +30,9 @@ export default function Alternative({ go, details, onRequest }) {
     if (busy) return
     setError('')
     if (name.trim().split(/\s+/).length < 2) return setError('Enter your first and last name.')
-    if (!isValidPhone(phone)) return setError('Enter a valid phone number, e.g. 08155500001.')
+    if (!isValidPhone(phone)) return setError(`Enter a valid phone number${phoneRule?.example ? `, e.g. ${phoneRule.example}` : ''}.`)
     const normal = normalizePhone(phone)
-    if (!isTestPhone(normal)) return setError(`Development testing uses synthetic numbers only: ${TEST_PHONE_RANGE}.`)
+    if (phoneRule && !phoneRule.test(normal)) return setError(phoneRule.message)
     if (!age) return setError('Tell us whether you are 18 or older.')
     if (!agree) return setError('Tick the box to agree, so a youth leader can register you.')
     setBusy(true)
@@ -56,7 +65,7 @@ export default function Alternative({ go, details, onRequest }) {
       <form className="form" onSubmit={submit} noValidate>
         <label>
           <span>Full name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="e.g. Test Voter One" />
+          <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder={phoneRule ? 'e.g. Test Voter One' : ''} />
         </label>
         <label>
           <span>Phone number</span>
@@ -66,13 +75,15 @@ export default function Alternative({ go, details, onRequest }) {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             autoComplete="off"
-            placeholder="08155500001"
-            aria-describedby="alt-phone-help"
+            placeholder={phoneRule?.example ?? ''}
+            aria-describedby={phoneRule?.hint ? 'alt-phone-help' : undefined}
           />
         </label>
-        <p id="alt-phone-help" className="fineprint">
-          Development: synthetic test numbers only ({TEST_PHONE_RANGE}).
-        </p>
+        {phoneRule?.hint && (
+          <p id="alt-phone-help" className="fineprint">
+            {phoneRule.hint}
+          </p>
+        )}
 
         <fieldset className="protoChoice">
           <legend>Are you 18 or older?</legend>
@@ -92,10 +103,11 @@ export default function Alternative({ go, details, onRequest }) {
           </div>
         )}
 
+        {age === 'adult' && consent.notice}
         {age === 'adult' && (
           <label className="protoCheck">
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-            <span>I agree to YPM keeping my name and phone number to register me to vote (draft notice).</span>
+            <span>{consent.label}</span>
           </label>
         )}
 
@@ -112,9 +124,11 @@ export default function Alternative({ go, details, onRequest }) {
         )}
       </form>
 
-      <button type="button" className="linkBtn protoLink" onClick={() => go('consent')}>
-        Back to the face check option
-      </button>
+      {onBack && (
+        <button type="button" className="linkBtn protoLink" onClick={onBack.onClick}>
+          {onBack.label}
+        </button>
+      )}
       <button type="button" className="linkBtn protoLink" onClick={() => go('login')}>
         I already have a voter code
       </button>

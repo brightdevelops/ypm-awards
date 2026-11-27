@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import ScreenFrame from '../ScreenFrame.jsx'
-import { looksLikeVotingCode, normalizeVoterCode } from '../simulator.js'
+import { looksLikeVotingCode, normalizeVoterCode } from '../codes.js'
 
 // Returning voters sign in with their voter code. No face scan.
-export default function Login({ go, api, onSignedIn, message }) {
+const FACE_HELP = 'You received this code when you registered. You won’t need to scan your face again.'
+
+export default function Login({ go, api, onSignedIn, message, help = FACE_HELP }) {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -69,7 +71,7 @@ export default function Login({ go, api, onSignedIn, message }) {
           />
         </label>
         <p id="login-help" className="fineprint">
-          You received this code when you registered. You won’t need to scan your face again.
+          {help}
         </p>
         {error && (
           <p className="error" role="alert">

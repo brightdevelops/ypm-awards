@@ -10,6 +10,11 @@ const VoterPrototype = import.meta.env.DEV
   ? lazy(() => import('./prototype/VoterPrototype.jsx'))
   : null
 
+// The voter page (/voter): registered voters sign in with their code; new
+// voters ask a youth leader to confirm them (no face scan). The database
+// decides whether it's switched on (migration 007).
+const VoterApp = lazy(() => import('./voter/VoterApp.jsx'))
+
 export default function App() {
   // Both doors show the same dashboard; each has its own key (see admin_keys).
   const path = window.location.pathname.replace(/\/+$/, '')
@@ -34,6 +39,14 @@ export default function App() {
           </p>
         </div>
       </div>
+    )
+  }
+
+  if (path === '/voter') {
+    return (
+      <Suspense fallback={<div className="shell"><div className="card center dim">Loading…</div></div>}>
+        <VoterApp />
+      </Suspense>
     )
   }
 

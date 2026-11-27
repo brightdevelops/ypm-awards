@@ -74,7 +74,8 @@ describe('voter codes', () => {
 })
 
 describe('the development voter flow collects nothing it shouldn’t', () => {
-  const files = filesUnder(root('src/prototype'))
+  // The prototype and the production voter page (src/voter) it shares screens with.
+  const files = [...filesUnder(root('src/prototype')), ...filesUnder(root('src/voter'))]
   const rel = (f) => f.slice(root('').length).replace(/\\/g, '/')
 
   it('has no camera, raw network, storage of codes, or logging', () => {
@@ -89,17 +90,17 @@ describe('the development voter flow collects nothing it shouldn’t', () => {
     }
   })
 
-  it('talks to Supabase only through connection.js', () => {
+  it('talks to Supabase only through connection.js (prototype) and VoterApp.jsx (voter page)', () => {
     for (const f of files) {
-      if (rel(f) === 'src/prototype/connection.js') continue
+      if (['src/prototype/connection.js', 'src/voter/VoterApp.jsx'].includes(rel(f))) continue
       const src = readFileSync(f, 'utf8')
       assert.ok(!/supabaseClient|@supabase|supabase\.rpc/.test(src), `${rel(f)} uses Supabase directly`)
     }
   })
 
-  it('uses sessionStorage only in voterSession.js', () => {
+  it('uses sessionStorage only in the session store', () => {
     for (const f of files) {
-      if (rel(f) === 'src/prototype/voterSession.js') continue
+      if (rel(f) === 'src/voter/session.js') continue
       assert.ok(!/sessionStorage/.test(readFileSync(f, 'utf8')), `${rel(f)} uses sessionStorage`)
     }
   })

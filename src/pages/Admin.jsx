@@ -14,11 +14,11 @@ const SESSION_STORE = `ypm-awards-admin-session${DOOR}`
 const EXPIRES_STORE = `${SESSION_STORE}:expires`
 const TAB_STORE = `ypm-awards-admin-tab${DOOR}`
 
-// Registered voters (Phase 3.4) is development-only. import.meta.env.DEV is
-// fixed at build time, so a production build contains neither the tab nor
-// its code, and no environment variable can switch it on there. The tab
-// also checks the database itself (see voterAccess in lib/voters.js).
-const VotersTab = import.meta.env.DEV ? lazy(() => import('../components/admin/VotersTab.jsx')) : null
+// Registered voters. The database decides whether it works: in Production
+// only once the owner switches voter accounts on (migration 007), and only
+// the youth-leader path; face checks stay development-only. Until then the
+// tab says it's switched off (see voterAccess in lib/voters.js).
+const VotersTab = lazy(() => import('../components/admin/VotersTab.jsx'))
 
 const TABS = [
   { id: 'results', label: 'Results' },

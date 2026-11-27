@@ -1,7 +1,9 @@
-// The development voter flow, simulator, tester panel and the admin
-// "Registered voters" tab must not be in a production build, even when
-// someone sets environment variables that look like they would switch them
-// on. Builds into a temporary folder (dist/ is untouched).
+// Production build (release of the youth-leader path): the voter page and
+// the Registered voters tab are in it (the database switches them on, 007);
+// the development prototype, simulator, tester panel, face-check
+// registration, provider functions, draft notice and synthetic numbers are
+// not, even when someone sets environment variables that look like they
+// would switch them on. Builds into a temporary folder (dist/ is untouched).
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -13,7 +15,7 @@ import { build } from 'vite'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 
 describe('production build', () => {
-  it('contains no part of the development voter flow or voter management', async () => {
+  it('contains the youth-leader path and no part of the development voter flow', async () => {
     const out = mkdtempSync(join(tmpdir(), 'ypm-build-'))
     const tries = ['VITE_VOTER_ACCOUNTS', 'VITE_DEV', 'VITE_ENABLE_VOTERS']
     for (const k of tries) process.env[k] = 'true'
@@ -27,25 +29,27 @@ describe('production build', () => {
         'voter_registration_start',
         'voter_registration_claim',
         'Tester panel',
-        'Simulated verification',
+        'Sign in as tester',
         'Simulated camera',
+        'Start face check',
         'prototype/voter',
         'ypm-dev-voter-session',
-        // Phase 3.4 admin tab
-        'admin_voter_stats',
-        'admin_list_voters',
-        'admin_register_voter',
-        'admin_reissue_voter_code',
-        'admin_revoke_voter',
-        'admin_resolve_review',
-        'admin_set_registration_mode',
-        'admin_restore_voter',
-        'Restore with a new code',
-        'Registered voters',
-        'Register in person',
-        'voterHandover',
+        'dev_provider_start',
+        'dev_provider_outbox',
+        'dev_provider_callback',
+        'dev_sandbox_start',
+        'provider_webhook_result',
+        'draft-2026-11-dev',
+        '08155500',
       ]) {
         assert.ok(!text.includes(marker), `production bundle contains "${marker}"`)
+      }
+      // The release: the voter page, the youth-leader path and voter management.
+      for (const marker of [
+        'voter_request_in_person', 'voter_login', 'voter_begin_ballot', 'ypm-register-2026-12-v1',
+        'admin_confirm_in_person', 'admin_in_person_requests', 'admin_register_voter', 'Registered voters',
+      ]) {
+        assert.ok(text.includes(marker), `production bundle is missing "${marker}"`)
       }
       // Sanity check: it is the real app.
       assert.ok(text.includes('admin_dashboard'))

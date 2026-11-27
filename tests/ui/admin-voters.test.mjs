@@ -80,7 +80,7 @@ const voterCount = async (db, phone) =>
 
 describe('who can use the Registered voters tab', () => {
   it('never in a production build, whatever the database says', () => {
-    assert.equal(voterAccess(false, { kind: 'ok', res: { verification_provider: 'simulated' } }), 'hidden')
+    assert.equal(voterAccess(false, { kind: 'ok', res: { verification_provider: 'simulated' } }), 'not_development', 'a production build never opens for the simulator alone')
   })
 
   it('on a database without migration 003 (production today): "not installed"', async () => {
@@ -485,10 +485,10 @@ describe('the tab keeps codes and numbers to itself', () => {
     }
   })
 
-  it('is loaded only in development builds', () => {
+  it('is loaded lazily, and only the database switches it on (no build flag)', () => {
     const admin = readFileSync(root('src/pages/Admin.jsx'), 'utf8')
-    assert.match(admin, /const VotersTab = import\.meta\.env\.DEV \? lazy\(/)
-    assert.ok(!/VITE_/.test(admin), 'no environment variable can switch it on')
+    assert.match(admin, /const VotersTab = lazy\(/)
+    assert.ok(!/VITE_/.test(admin), 'no environment variable switches it on or off')
     for (const f of ['src/App.jsx', 'src/pages/Vote.jsx', 'src/components/admin/CodesTab.jsx']) {
       assert.ok(!/VotersTab|lib\/voters/.test(readFileSync(root(f), 'utf8')), f)
     }
@@ -572,7 +572,7 @@ describe('voterAccess with in-person requests (migration 006)', () => {
     assert.equal(voterAccess(true, none), 'not_development')
     assert.equal(voterAccess(true, { ...none, inPerson: false }), 'not_development')
     assert.equal(voterAccess(true, { ...none, inPerson: true }), 'ready')
-    assert.equal(voterAccess(false, { ...none, inPerson: true }), 'hidden', 'never in a production build')
+    assert.equal(voterAccess(false, { ...none, inPerson: true }), 'ready', 'a production build opens once the database answers (007 switched on)')
     assert.equal(voterAccess(true, { kind: 'unexpected', res: { status: 'disabled' }, inPerson: true }), 'not_development')
   })
 })

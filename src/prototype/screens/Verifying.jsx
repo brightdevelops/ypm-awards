@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 import { VERIFY_STEPS, after } from '../simulator.js'
 
 // Shows progress while `task` (simulated provider + status checks on the

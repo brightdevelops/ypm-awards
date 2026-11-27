@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 
 // DRAFT wording for the prototype. It has not been reviewed against the
 // NDPA 2023 / GAID 2025, no DPIA has been done, and the retention period is

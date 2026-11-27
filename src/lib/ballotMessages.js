@@ -5,7 +5,7 @@
 export const START_REFUSALS = {
   registered_voter:
     'This phone number is registered for a voter account, so it can’t start a ballot here. ' +
-    'Please see a youth leader.',
+    'Sign in with your voter code instead.',
   registration_required:
     'Voting now needs a registered voter account. Please see a youth leader to register.',
 }

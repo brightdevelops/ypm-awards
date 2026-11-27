@@ -1,30 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import './prototype.css'
-import { Progress } from './ScreenFrame.jsx'
+import '../voter/voter.css'
+import { Progress } from '../voter/ScreenFrame.jsx'
 import { voterApi, configured } from './connection.js'
 import { createSessionStore } from './voterSession.js'
-import { CONSENT_VERSION, DELIVERIES, OUTCOMES, VERIFY_TIMING, maskPhone } from './simulator.js'
+import { CONSENT_VERSION, DELIVERIES, OUTCOMES, VERIFY_TIMING, TEST_PHONE_RANGE, isTestPhone, maskPhone } from './simulator.js'
 import { runProviderCheck } from './providerRelay.js'
 import { BALLOT } from '../data/categories.js'
 import TesterPanel from './TesterPanel.jsx'
-import Login from './screens/Login.jsx'
+import Login from '../voter/screens/Login.jsx'
 import Register from './screens/Register.jsx'
 import Consent from './screens/Consent.jsx'
 import Camera from './screens/Camera.jsx'
 import Verifying from './screens/Verifying.jsx'
 import Success from './screens/Success.jsx'
 import Duplicate from './screens/Duplicate.jsx'
-import Recovery from './screens/Recovery.jsx'
-import Alternative from './screens/Alternative.jsx'
-import InPerson from './screens/InPerson.jsx'
-import Welcome from './screens/Welcome.jsx'
-import Ballot from './screens/Ballot.jsx'
-import Notice from './screens/Notice.jsx'
+import Recovery from '../voter/screens/Recovery.jsx'
+import Alternative from '../voter/screens/Alternative.jsx'
+import InPerson from '../voter/screens/InPerson.jsx'
+import Welcome from '../voter/screens/Welcome.jsx'
+import Ballot from '../voter/screens/Ballot.jsx'
+import Notice from '../voter/screens/Notice.jsx'
 
 // Phase 3.3 DEVELOPMENT ONLY: the voter registration screens, connected to
 // the development database (migration 003 + the dev simulator).
 // Opened only from /prototype/voter under `npm run dev` (see App.jsx).
 // No camera. Face-check results are chosen by a signed-in tester.
+
+const SYNTHETIC_PHONES = {
+  test: isTestPhone,
+  message: `Development testing uses synthetic numbers only: ${TEST_PHONE_RANGE}.`,
+  hint: `Development: synthetic test numbers only (${TEST_PHONE_RANGE}).`,
+  example: '08155500001',
+}
 
 const PROGRESS = { register: 0, consent: 1, camera: 2, verifying: 2, success: 3 }
 
@@ -554,7 +561,15 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
       body = <Recovery go={go} />
       break
     case 'alternative':
-      body = <Alternative go={go} details={details} onRequest={requestInPerson} />
+      body = (
+        <Alternative
+          go={go}
+          details={details}
+          onRequest={requestInPerson}
+          phoneRule={SYNTHETIC_PHONES}
+          onBack={{ label: 'Back to the face check option', onClick: () => go('consent') }}
+        />
+      )
       break
     case 'inperson':
       body = (

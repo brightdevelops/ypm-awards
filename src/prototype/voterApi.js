@@ -1,4 +1,5 @@
 // DEVELOPMENT ONLY. The voter and tester calls used by /prototype/voter.
+// The voter calls themselves live in src/voter/calls.js.
 //
 // Every call resolves to one of:
 //   { kind: 'answer', status, data }  the server replied (status may be a refusal)
@@ -11,31 +12,16 @@
 // (the Supabase client in the app, via connection.js; a test database in
 // tests).
 
+import { createCaller, createVoterCalls } from '../voter/calls.js'
+
 export function createVoterApi(rpc) {
-  const inFlight = new Map()
-
-  async function invoke(fn, args) {
-    try {
-      const { data, error } = await rpc(fn, args)
-      if (error || !data || typeof data !== 'object') return { kind: 'failed' }
-      if (data.status === 'unauthorized') return { kind: 'unauthorized', data }
-      return { kind: 'answer', status: data.status, data }
-    } catch {
-      return { kind: 'failed' }
-    }
-  }
-
-  // One request at a time per key: a double tap gets the same promise
-  // instead of a second request.
-  function once(key, fn, args) {
-    if (inFlight.has(key)) return inFlight.get(key)
-    const p = invoke(fn, args).finally(() => inFlight.delete(key))
-    inFlight.set(key, p)
-    return p
-  }
+  const caller = createCaller(rpc)
+  const { invoke, once } = caller
 
   return {
-    // Voter
+    // Voter (shared with the production voter page)
+    ...createVoterCalls(rpc, caller),
+    // Online registration with a (simulated) face check: development only.
     start: (name, phone, adult, consentVersion) =>
       once('start', 'voter_registration_start', {
         p_name: name,
@@ -43,26 +29,7 @@ export function createVoterApi(rpc) {
         p_consent_version: consentVersion,
         p_adult: adult,
       }),
-    // Migration 006: confirmed by a youth leader instead of a face check.
-    requestInPerson: (name, phone, adult, consentVersion) =>
-      once('inPerson', 'voter_request_in_person', {
-        p_name: name,
-        p_phone: phone,
-        p_consent_version: consentVersion,
-        p_adult: adult,
-      }),
-    status: (token) => invoke('voter_registration_status', { p_token: token }),
     claim: (token) => once('claim', 'voter_registration_claim', { p_token: token }),
-    login: (code) => once('login', 'voter_login', { p_code: code }),
-    logout: (session) => invoke('voter_logout', { p_session: session }),
-    begin: (session) => once('begin', 'voter_begin_ballot', { p_session: session }),
-    save: (session, categoryId, nomineeName) =>
-      invoke('voter_save_vote', {
-        p_session: session,
-        p_category_id: categoryId,
-        p_nominee_name: nomineeName,
-      }),
-    submit: (session) => once('submit', 'voter_submit_ballot', { p_session: session }),
 
     // Tester (development only; needs a dev admin session)
     simulate: (adminSession, token, outcome) =>

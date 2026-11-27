@@ -397,6 +397,11 @@ export default function Vote() {
                 {error}
               </p>
             )}
+            {(error === START_REFUSALS.registered_voter || error === START_REFUSALS.registration_required) && (
+              <p className="small">
+                <a href="/voter">Sign in with your voter code, or ask a youth leader to register you</a>
+              </p>
+            )}
             <button className="btn primary" disabled={busy}>
               {busy ? 'Starting…' : 'Start voting'}
             </button>

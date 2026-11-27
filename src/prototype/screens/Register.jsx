@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ScreenFrame from '../ScreenFrame.jsx'
+import ScreenFrame from '../../voter/ScreenFrame.jsx'
 import { isValidPhone, normalizePhone } from '../../lib/phone.js'
 import { TEST_PHONE_RANGE, isTestPhone } from '../simulator.js'
 

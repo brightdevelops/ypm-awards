@@ -1,7 +1,6 @@
-// DEVELOPMENT ONLY (Phase 3.4). The admin "Registered voters" tab.
-// Admin.jsx loads it only when import.meta.env.DEV is true, so it isn't in a
-// production build. It also refuses to work unless the database itself is a
-// development one (see voterAccess in lib/voters.js).
+// The admin "Registered voters" tab. In a production build it works only
+// once the database's voter accounts are switched on (migration 007), and
+// only for the youth-leader path (see voterAccess in lib/voters.js).
 //
 // Phone numbers arrive from the server already shortened ("•••• 0012").
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -64,7 +63,6 @@ export default function VotersTab({ adminRpc, adminLabel }) {
   }
 
   const access = voterAccess(import.meta.env.DEV, stats)
-  if (access === 'hidden') return null
   if (access === 'loading') return <div className="card center dim">Loading voter accounts…</div>
   if (access === 'not_installed') {
     return (
@@ -91,23 +89,25 @@ export default function VotersTab({ adminRpc, adminLabel }) {
       <div className="card center emptyState">
         <p className="historicalHead">Voter management is switched off for this database</p>
         <p className="dim small">
-          It is available only on a database marked as development, with simulated verification
-          switched on or in-person requests installed (migration 006). Real voter registration
-          isn’t ready for use yet.
+          Voter accounts are off here. In Production the database owner switches them on
+          (migration 007); in Development they need migration 006 or simulated verification.
+          Everything else on this dashboard works as usual.
         </p>
       </div>
     )
   }
 
   const s = stats.res
+  const simulated = s.verification_provider === 'simulated' // development only (003)
   return (
     <div className="votersTab">
       <div className="sectionHead">
         <div>
           <h2 className="sectionTitle">Registered voters</h2>
           <p className="dim small">
-            Development only. Registered voters sign in with a voter code (YPM-…), not a voting
-            code, so the “Codes required” setting doesn’t apply to them.
+            {simulated && 'Development. '}Registered voters sign in with a voter code (YPM-…) on
+            the voter page (/voter), not a voting code, so the “Codes required” setting doesn’t
+            apply to them.
           </p>
         </div>
         <div className="adminActions">
@@ -120,11 +120,18 @@ export default function VotersTab({ adminRpc, adminLabel }) {
         </div>
       </div>
 
-      <p className="callout warn" role="note">
-        Online registrations here use <strong>simulated</strong> verification. A “possible
-        duplicate” is a tester’s choice, not a biometric comparison. No camera or face data is
-        involved anywhere.
-      </p>
+      {simulated ? (
+        <p className="callout warn" role="note">
+          Online registrations here use <strong>simulated</strong> verification. A “possible
+          duplicate” is a tester’s choice, not a biometric comparison. No camera or face data is
+          involved anywhere.
+        </p>
+      ) : (
+        <p className="callout info" role="note">
+          No face checks. People register in person with a youth leader, or ask on the voter page
+          to be confirmed by one. No camera or face data is involved anywhere.
+        </p>
+      )}
 
       {notice && <p className="okBanner" role="status">{notice}</p>}
 
@@ -150,7 +157,7 @@ export default function VotersTab({ adminRpc, adminLabel }) {
       </section>
 
       <section className="card voterCard" aria-labelledby="regModeTitle">
-        <h3 id="regModeTitle" className="voterCardTitle">Online registration</h3>
+        <h3 id="regModeTitle" className="voterCardTitle">{simulated ? 'Online registration' : 'Registration'}</h3>
         <div className="modeButtons" role="group" aria-label="Registration mode">
           {Object.entries(MODES).map(([id, m]) => (
             <button

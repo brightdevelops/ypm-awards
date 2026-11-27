@@ -504,8 +504,9 @@ export function RegisterInPersonDialog({ api, adminLabel, consentVersion, onDone
           <span>They are 18 or over</span>
         </label>
         <p className="dim small">
-          Under-18 registration isn’t available yet. Development database: use synthetic test
-          identities only.
+          Under-18 registration isn’t available yet. The privacy notice is on the voter page
+          (/voter, “First time? Register to vote”); show it to them before ticking. On a
+          development database, use synthetic test identities only.
         </p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="dialogActions">
