@@ -350,6 +350,27 @@ try {
         select (r->>'status') || ',' || (r->>'voter_code' is not null)::text from smoke_result;`).trim().split(/\r?\n/).filter(Boolean).pop()
       if (!/^(started,true|code_required,false)$/.test(smoke)) fail(`self-registration as the browser: ${smoke}`)
       else ok(`as the browser, self-registration answers ${smoke.startsWith('started') ? '"started" with a voter code' : '"code_required" (Codes required is on in this copy)'}`)
+      // Remove the synthetic smoke-test ballot and its voter code.
+      pg.psql('postgres', `
+        create temp table smoke_codes as
+          select voting_code_id id from public.ballots where voter_phone = '08155500998' and voting_code_id is not null;
+        delete from public.votes where ballot_id in (select id from public.ballots where voter_phone = '08155500998');
+        delete from public.ballots where voter_phone = '08155500998';
+        delete from public.voting_codes where id in (select id from smoke_codes) and created_by = 'self-registration';`)
+      same('after the smoke test')
+      if (rollback) {
+        pg.psql('postgres', SELF_REG_DOWN_SQL)
+        ok('008 undo runs on the restored copy')
+        same('after undoing 008')
+        const back = pg.psql('postgres', `
+          select set_config('request.headers', '{"x-forwarded-for":"203.0.113.251"}', false);
+          set role anon;
+          create temp table smoke_back as select public.begin_ballot('Test Rehearsal', '08155500997', null) r;
+          reset role;
+          select (r->>'status') || ',' || (r->>'voter_code' is null)::text from smoke_back;`).trim().split(/\r?\n/).filter(Boolean).pop()
+        if (back !== 'started,true') fail(`after undoing 008, anonymous voting answers ${back}`)
+        else ok('after undoing 008, anonymous voting works as before (no voter code)')
+      }
     } catch (e) {
       fail(`the Development path did not complete on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
     }
