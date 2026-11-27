@@ -22,6 +22,8 @@ export const CHOICE_SQL = readFileSync(root('migrations/006_verification_choice.
 export const CHOICE_DOWN_SQL = readFileSync(root('migrations/006_verification_choice.down.sql'), 'utf8')
 export const LIVE_SQL = readFileSync(root('migrations/007_production_voter_accounts.sql'), 'utf8')
 export const LIVE_DOWN_SQL = readFileSync(root('migrations/007_production_voter_accounts.down.sql'), 'utf8')
+export const SELF_REG_SQL = readFileSync(root('migrations/008_self_registration.sql'), 'utf8')
+export const SELF_REG_DOWN_SQL = readFileSync(root('migrations/008_self_registration.down.sql'), 'utf8')
 
 // Supabase's API roles, with Supabase's default grants: anon and
 // authenticated get every privilege on new objects in \`public\`, so RLS
@@ -72,6 +74,7 @@ export const LEGACY = {
 // '003' = through 003 (voter accounts, before the 004 safeguards);
 // true = every migration through 004 plus the current ballot-sync.sql;
 // '005' = all of that plus 005 (simulated provider); '006' = plus 006; '007' = plus 007.
+// '008' = 001, 002, ballot-sync.sql and 008 (self-registration; no voter accounts).
 export async function freshDb({ migrate = true } = {}) {
   const db = new PGlite()
   await db.exec(ROLES_SQL)
@@ -93,10 +96,11 @@ export async function freshDb({ migrate = true } = {}) {
 
   await db.exec(VAULT_STUB_SQL)
   if (migrate) await db.exec(MIGRATION_SQL)
-  if (migrate === true || migrate === '002' || migrate === '003' || migrate === '005' || migrate === '006' || migrate === '007') {
+  if (migrate === true || migrate === '002' || migrate === '003' || migrate === '005' || migrate === '006' || migrate === '007' || migrate === '008') {
     await db.exec(BALLOT_MIGRATION_SQL)
     await db.exec(BALLOT_SYNC_SQL)
   }
+  if (migrate === '008') await db.exec(SELF_REG_SQL)
   if (migrate === true || migrate === '003' || migrate === '005' || migrate === '006' || migrate === '007') await db.exec(VOTER_MIGRATION_SQL)
   if (migrate === true || migrate === '005' || migrate === '006' || migrate === '007') await db.exec(SAFEGUARDS_SQL)
   if (migrate === '005' || migrate === '006' || migrate === '007') await db.exec(PROVIDER_SQL)

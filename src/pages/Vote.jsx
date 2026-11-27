@@ -55,6 +55,7 @@ export default function Vote() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [justPicked, setJustPicked] = useState(null)
+  const [voterCode, setVoterCode] = useState(null) // self-registration (migration 008): shown to the voter
   const advanceTimer = useRef(null)
   const accountBallot = useRef(false) // a youth leader linked this ballot to a voter account
 
@@ -75,6 +76,7 @@ export default function Vote() {
         setBallotId(local.ballotId)
         setPicks(local.picks || {})
         setUnsynced(local.unsynced || {})
+        setVoterCode(local.voterCode || null)
         if (local.completed) {
           setView('done')
           return
@@ -104,6 +106,7 @@ export default function Vote() {
       picks: next.picks ?? picks,
       unsynced: next.unsynced ?? unsynced,
       completed: next.completed ?? false,
+      voterCode: 'voterCode' in next ? next.voterCode : voterCode,
     })
   }
 
@@ -152,10 +155,14 @@ export default function Vote() {
         setShowCode(true)
         return setError(
           'This number already has an unfinished ballot from another phone or browser. ' +
-            'Finish it there, or ask a youth leader for a code for this number and enter it here.'
+            'Enter the voter code you were shown when you started, or ask a youth leader for a new code for this number.'
         )
       case 'rate_limited':
-        return setError('Too many attempts. Please wait 15 minutes and try again.')
+        return setError(
+          data.reason === 'network'
+            ? 'Too many new voters have started from this network in the last hour. Please try again later, use mobile data, or ask a youth leader for a voting code.'
+            : 'Too many attempts. Please wait 15 minutes and try again.'
+        )
       case 'registered_voter':
       case 'registration_required':
         return setError(START_REFUSALS[data.status])
@@ -166,11 +173,21 @@ export default function Vote() {
     const restored = {}
     for (const v of data?.picks || []) restored[v.category_id] = v.nominee_name
 
+    // A self-registered ballot comes with its voter code, shown only now. On
+    // this device it stays visible (kept with the ballot); elsewhere, no.
+    const local = loadLocal()
+    const newCode =
+      data.status === 'started' && typeof data.voter_code === 'string'
+        ? data.voter_code
+        : local?.ballotId === data.ballot_id
+          ? local?.voterCode ?? null
+          : null
+    setVoterCode(newCode)
     setBallotId(data.ballot_id)
     setPicks(restored)
     const answered = BALLOT.findIndex((c) => !restored[c.id])
     setIndex(answered === -1 ? 0 : answered)
-    persist({ ballotId: data.ballot_id, picks: restored, unsynced: {} })
+    persist({ ballotId: data.ballot_id, picks: restored, unsynced: {}, voterCode: newCode })
     setView(answered === -1 ? 'review' : 'voting')
   }
 
@@ -409,7 +426,7 @@ export default function Vote() {
               <p className="fineprint" id="code-help">
                 {needsCode
                   ? 'Each voter needs a code from a youth leader. It works for one person only.'
-                  : 'Codes come from youth leaders. Use yours to continue a ballot from another phone.'}
+                  : 'Use the voter code you were shown when you started, or one from a youth leader.'}
               </p>
             )}
             <p className="fineprint">
@@ -431,6 +448,7 @@ export default function Vote() {
           <p className="eyebrow">Last step</p>
           <h1 className="display">Review your votes</h1>
           <p className="dim">Tap any line to change it.</p>
+          <VoterCodeNote code={voterCode} />
 
           <ul className="review">
             {BALLOT.map((c, i) => (
@@ -485,6 +503,8 @@ export default function Vote() {
           </span>
         </div>
       </div>
+
+      {index === 0 && <VoterCodeNote code={voterCode} />}
 
       <div className="card">
         <h1 className="categoryName">{category.name}</h1>
@@ -547,6 +567,24 @@ export default function Vote() {
         Review all {BALLOT.length} categories
       </button>
     </Shell>
+  )
+}
+
+// The voter code from self-registration (migration 008). With the phone
+// number, it reopens this ballot on another phone or browser.
+function VoterCodeNote({ code }) {
+  if (!code) return null
+  return (
+    <div className="card voterCodeNote" role="note">
+      <p className="small">Your voter code</p>
+      <p className="voterCode">
+        <strong>{code}</strong>
+      </p>
+      <p className="fineprint">
+        Write it down or take a screenshot. With your phone number, it lets you continue this
+        ballot on another phone. Don’t share it.
+      </p>
+    </div>
   )
 }
 

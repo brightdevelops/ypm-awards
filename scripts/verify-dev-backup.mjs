@@ -31,6 +31,7 @@ import { findPgBin, startCluster } from '../tests/concurrency/pg-cluster.mjs'
 import {
   VAULT_STUB_SQL, MIGRATION_SQL, BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL, VOTER_MIGRATION_SQL,
   SAFEGUARDS_SQL, PROVIDER_SQL, CHOICE_SQL, LIVE_SQL, DOWN_SQL, BALLOT_DOWN_SQL,
+  SELF_REG_SQL, SELF_REG_DOWN_SQL, CHOICE_DOWN_SQL, PROVIDER_DOWN_SQL, SAFEGUARDS_DOWN_SQL, VOTER_DOWN_SQL,
 } from '../tests/db/helpers.mjs'
 
 const dir = process.argv[2]
@@ -39,7 +40,8 @@ const expect = expectIdx > 0 ? process.argv[expectIdx + 1] : null
 const rehearse = process.argv.includes('--rehearse')
 const production = process.argv.includes('--production')
 // --through 002: rehearse only 001, 002 and ballot-sync.sql (the
-// voting-codes release). --rollback: then undo them (002, then 001).
+// voting-codes release). --through 008: plus 008 (self-registration).
+// --rollback: then undo them (008, then 002, then 001).
 const throughIdx = process.argv.indexOf('--through')
 const through = throughIdx > 0 ? process.argv[throughIdx + 1] : '007'
 const rollback = process.argv.includes('--rollback')
@@ -178,7 +180,7 @@ try {
   for (const t of restored.keys()) if (!recorded.has(t)) fail(`${t}: restored but not in counts.tsv`)
   if (!failures) ok(`restored ${restored.size} tables; row counts match (${rows} rows)`)
 
-  if (rehearse && production && through === '002') {
+  if (rehearse && production && (through === '002' || through === '008')) {
     // The voting-codes release: 001, 002 + ballot-sync.sql only.
     const TABLES = `select string_agg(table_name, ',' order by table_name) from information_schema.tables
                      where table_schema = 'public' and table_type = 'BASE TABLE';`
@@ -193,7 +195,19 @@ try {
     const before = pg.psql('postgres', FINGERPRINT).trim()
     const resultsBefore = pg.psql('postgres', RESULTS).trim()
     const [nb, ns, nv] = before.split('/')
-    const sameVotes = (when) => {
+    const CODES = `select case when to_regclass('public.voting_codes') is null then 'none' else
+                     (select count(*) || '/' || coalesce(md5(string_agg(id::text || code_hash || coalesce(phone, '') ||
+                        coalesce(redeemed_at::text, '') || coalesce(revoked_at::text, ''), ',' order by id)), '-')
+                        from public.voting_codes) end;`
+    const codesBefore = installed.includes('001') ? pg.psql('postgres', CODES).trim() : null
+    const sameCodes = (when) => {
+      if (codesBefore === null) return
+      const now = pg.psql('postgres', CODES).trim()
+      if (now !== codesBefore) fail(`voting codes changed ${when}`)
+      else ok(`every voting code is exactly as before ${when} (${codesBefore.split('/')[0]})`)
+    }
+    const sameVotes = (when, { codes = true } = {}) => {
+      if (codes) sameCodes(when)
       if (pg.psql('postgres', FINGERPRINT).trim() !== before) fail(`ballots or votes changed ${when}`)
       else ok(`every ballot and vote is exactly as before ${when} (${nb} ballots, ${ns} submitted, ${nv} votes)`)
       if (pg.psql('postgres', RESULTS).trim() !== resultsBefore) fail(`the results changed ${when}`)
@@ -209,6 +223,10 @@ try {
         for (const sqlText of files) pg.psql('postgres', sqlText)
         ok(`${id === '002' ? '002 + ballot-sync.sql' : id} installs on the restored copy`)
       }
+      if (through === '008') {
+        pg.psql('postgres', SELF_REG_SQL)
+        ok('008 (self-registration) installs on the restored copy')
+      }
       sameVotes('after installing')
       if (has('TABLE public voters') || pg.psql('postgres', `select to_regclass('public.voters') is not null;`).trim() === 't') {
         fail('voter accounts (003) are present; this release must not include them')
@@ -222,22 +240,66 @@ try {
       const smoke = pg.psql('postgres', `
         select set_config('request.headers', '{"x-forwarded-for":"203.0.113.250"}', false);
         set role anon;
-        select (public.begin_ballot('Test Rehearsal', '08155500998', null)->>'status');
-        reset role;`).trim().split(/\r?\n/).filter(Boolean).pop()
-      if (!['started', 'code_required'].includes(smoke)) fail(`anonymous ballot as the browser: ${smoke}`)
-      else ok(`as the browser, starting a ballot answers "${smoke}" (codes ${smoke === 'started' ? 'optional' : 'required'} on this copy)`)
-      pg.psql('postgres', `delete from public.votes where ballot_id in (select id from public.ballots where voter_phone = '08155500998');
-                           delete from public.ballots where voter_phone = '08155500998';`)
-
+        create temp table smoke_result as select public.begin_ballot('Test Rehearsal', '08155500998', null) r;
+        reset role;
+        select (r->>'status') || '+code=' ||
+               (exists (select 1 from public.voting_codes c join public.ballots b on b.voting_code_id = c.id
+                         where b.voter_phone = '08155500998' and c.created_by = 'self-registration'
+                           and c.phone = '08155500998' and c.code_hash = ypm_private.sha256_hex(ypm_private.normalize_code(r->>'voter_code'))))::text
+          from smoke_result;`).trim().split(/\r?\n/).filter(Boolean).pop()
+      const [smokeStatus, smokeCode] = smoke.split('+code=')
+      if (!['started', 'code_required'].includes(smokeStatus)) fail(`anonymous ballot as the browser: ${smoke}`)
+      else ok(`as the browser, starting a ballot answers "${smokeStatus}" (codes ${smokeStatus === 'started' ? 'optional' : 'required'} on this copy)`)
+      if (through === '008' && smokeStatus === 'started') {
+        if (smokeCode !== 'true') fail('self-registration gave the smoke-test voter no voter code')
+        else ok('self-registration gave that voter a phone-bound voter code')
+      }
+      if (through === '008' && smokeStatus === 'code_required') {
+        // Codes are required on this copy. Switch them off ON THE COPY ONLY,
+        // to exercise self-registration on Production's own data, then back.
+        const self = pg.psql('postgres', `
+          update public.settings set require_voting_code = false where id = 1;
+          select set_config('request.headers', '{"x-forwarded-for":"203.0.113.252"}', false);
+          set role anon;
+          create temp table smoke_self as select public.begin_ballot('Test Rehearsal', '08155500998', null) r;
+          reset role;
+          update public.settings set require_voting_code = true where id = 1;
+          select (r->>'status') || ',' || (r->>'voter_code' ~ '^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$')::text from smoke_self;`).trim().split(/\r?\n/).filter(Boolean).pop()
+        if (self !== 'started,true') fail(`self-registration on this copy (codes optional): ${self}`)
+        else ok('with codes optional (copy only), self-registration starts a ballot with a voter code; switched back')
+      }
+      // Remove the synthetic smoke-test ballot (and its voter code, if any).
+      pg.psql('postgres', `
+        create temp table smoke_codes as
+          select voting_code_id id from public.ballots where voter_phone = '08155500998' and voting_code_id is not null;
+        delete from public.votes where ballot_id in (select id from public.ballots where voter_phone = '08155500998');
+        delete from public.ballots where voter_phone = '08155500998';
+        delete from public.voting_codes where id in (select id from smoke_codes) and created_by = 'self-registration';
+        delete from public.rate_events where bucket like '%203.0.113.250%';`)
       if (rollback) {
-        pg.psql('postgres', BALLOT_DOWN_SQL)
-        ok('002 undo runs on the restored copy')
-        pg.psql('postgres', DOWN_SQL)
-        ok('001 undo runs on the restored copy')
-        sameVotes('after rolling back')
-        const back = exists(OLD_SITE)
-        if (back.length) fail(`after rolling back, the live site would miss: ${back.join(', ')}`)
-        else ok('after rolling back, every function the live site calls exists')
+        if (through === '008') {
+          pg.psql('postgres', SELF_REG_DOWN_SQL)
+          ok('008 undo runs on the restored copy')
+          sameVotes('after undoing 008')
+        }
+        if (installed.includes('001') || installed.includes('002')) {
+          // 001 and 002 were already live when this backup was taken: rolling
+          // back this release means undoing only what it adds.
+          console.log('info  001 and 002 were already in this backup, so the rollback stops here')
+          const back = exists([...OLD_SITE, ...NEW_SITE])
+          if (back.length) fail(`after undoing 008, missing: ${back.join(', ')}`)
+          else ok('after undoing 008, every function the current site and the previous site call exists')
+        } else {
+          pg.psql('postgres', BALLOT_DOWN_SQL)
+          ok('002 undo runs on the restored copy')
+          pg.psql('postgres', DOWN_SQL)
+          ok('001 undo runs on the restored copy')
+          // 001's undo removes the voting_codes table, so codes are checked after 008's undo above.
+          sameVotes('after rolling back', { codes: false })
+          const back = exists(OLD_SITE)
+          if (back.length) fail(`after rolling back, the live site would miss: ${back.join(', ')}`)
+          else ok('after rolling back, every function the live site calls exists')
+        }
       }
     } catch (e) {
       fail(`the release did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
@@ -278,6 +340,76 @@ try {
       else ok('voter accounts answer "disabled" until switched on; anonymous voting still works')
     } catch (e) {
       fail(`the chain did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
+    }
+  } else if (rehearse && through === '008') {
+    // Development → self-registration: undo 006, 005, 004, 003 (whichever
+    // are installed), then install 008, on the restored copy.
+    const TABLES = `select string_agg(table_schema || '.' || table_name, ',' order by 1) from information_schema.tables
+                     where table_schema in ('public', 'ypm_private') and table_type = 'BASE TABLE';`
+    const before = pg.psql('postgres', FINGERPRINT).trim()
+    const resultsBefore = pg.psql('postgres', RESULTS).trim()
+    const codesBefore = pg.psql('postgres', `select count(*) || '/' || coalesce(md5(string_agg(id::text || code_hash, ',' order by id)), '-') from public.voting_codes;`).trim()
+    const tablesBefore = pg.psql('postgres', TABLES).trim().split(',')
+    const [nb, ns, nv] = before.split('/')
+    const same = (when) => {
+      if (pg.psql('postgres', FINGERPRINT).trim() !== before) fail(`ballots or votes changed ${when}`)
+      else ok(`every ballot and vote is exactly as before ${when} (${nb} ballots, ${ns} submitted, ${nv} votes)`)
+      if (pg.psql('postgres', RESULTS).trim() !== resultsBefore) fail(`the results changed ${when}`)
+      else ok(`the results are unchanged ${when}`)
+      if (pg.psql('postgres', `select count(*) || '/' || coalesce(md5(string_agg(id::text || code_hash, ',' order by id)), '-') from public.voting_codes;`).trim() !== codesBefore) fail(`voting codes changed ${when}`)
+      else ok(`every voting code is unchanged ${when} (${codesBefore.split('/')[0]})`)
+    }
+    try {
+      for (const [id, mark, file] of [
+        ['006', 'ypm_private.in_person_requests', CHOICE_DOWN_SQL], ['005', 'ypm_private.provider_sessions', PROVIDER_DOWN_SQL],
+        ['004', 'ypm_private.consent_versions', SAFEGUARDS_DOWN_SQL], ['003', 'public.voters', VOTER_DOWN_SQL],
+      ]) {
+        if (pg.psql('postgres', `select to_regclass('${mark}') is not null;`).trim() !== 't') { console.log(`info  ${id} is not installed here; nothing to undo`); continue }
+        pg.psql('postgres', file)
+        ok(`${id} undo runs on the restored copy`)
+      }
+      same('after undoing 006–003')
+      const now = pg.psql('postgres', TABLES).trim().split(',')
+      const gone = tablesBefore.filter((t) => !now.includes(t))
+      console.log(`info  tables the undo removes (voter accounts and verification): ${gone.join(', ') || 'none'}`)
+      const unexpected = gone.filter((t) => ['public.ballots', 'public.votes', 'public.settings', 'public.voting_codes',
+        'public.admin_users', 'public.admin_audit', 'public.ballot_categories', 'public.ballot_nominees', 'public.admin_keys'].includes(t))
+      if (unexpected.length) fail(`the undo would remove core tables: ${unexpected.join(', ')}`)
+      else ok('no voting, code, admin or ballot table is removed')
+      pg.psql('postgres', SELF_REG_SQL)
+      ok('008 (self-registration) installs on the restored copy')
+      same('after installing 008')
+      const smoke = pg.psql('postgres', `
+        select set_config('request.headers', '{"x-forwarded-for":"203.0.113.250"}', false);
+        set role anon;
+        create temp table smoke_result as select public.begin_ballot('Test Rehearsal', '08155500998', null) r;
+        reset role;
+        select (r->>'status') || ',' || (r->>'voter_code' is not null)::text from smoke_result;`).trim().split(/\r?\n/).filter(Boolean).pop()
+      if (!/^(started,true|code_required,false)$/.test(smoke)) fail(`self-registration as the browser: ${smoke}`)
+      else ok(`as the browser, self-registration answers ${smoke.startsWith('started') ? '"started" with a voter code' : '"code_required" (Codes required is on in this copy)'}`)
+      // Remove the synthetic smoke-test ballot and its voter code.
+      pg.psql('postgres', `
+        create temp table smoke_codes as
+          select voting_code_id id from public.ballots where voter_phone = '08155500998' and voting_code_id is not null;
+        delete from public.votes where ballot_id in (select id from public.ballots where voter_phone = '08155500998');
+        delete from public.ballots where voter_phone = '08155500998';
+        delete from public.voting_codes where id in (select id from smoke_codes) and created_by = 'self-registration';`)
+      same('after the smoke test')
+      if (rollback) {
+        pg.psql('postgres', SELF_REG_DOWN_SQL)
+        ok('008 undo runs on the restored copy')
+        same('after undoing 008')
+        const back = pg.psql('postgres', `
+          select set_config('request.headers', '{"x-forwarded-for":"203.0.113.251"}', false);
+          set role anon;
+          create temp table smoke_back as select public.begin_ballot('Test Rehearsal', '08155500997', null) r;
+          reset role;
+          select (r->>'status') || ',' || (r->>'voter_code' is null)::text from smoke_back;`).trim().split(/\r?\n/).filter(Boolean).pop()
+        if (back !== 'started,true') fail(`after undoing 008, anonymous voting answers ${back}`)
+        else ok('after undoing 008, anonymous voting works as before (no voter code)')
+      }
+    } catch (e) {
+      fail(`the Development path did not complete on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
     }
   } else if (rehearse && has005) {
     console.log('info  --rehearse skipped: 005 is already in this backup')
