@@ -195,7 +195,19 @@ try {
     const before = pg.psql('postgres', FINGERPRINT).trim()
     const resultsBefore = pg.psql('postgres', RESULTS).trim()
     const [nb, ns, nv] = before.split('/')
-    const sameVotes = (when) => {
+    const CODES = `select case when to_regclass('public.voting_codes') is null then 'none' else
+                     (select count(*) || '/' || coalesce(md5(string_agg(id::text || code_hash || coalesce(phone, '') ||
+                        coalesce(redeemed_at::text, '') || coalesce(revoked_at::text, ''), ',' order by id)), '-')
+                        from public.voting_codes) end;`
+    const codesBefore = installed.includes('001') ? pg.psql('postgres', CODES).trim() : null
+    const sameCodes = (when) => {
+      if (codesBefore === null) return
+      const now = pg.psql('postgres', CODES).trim()
+      if (now !== codesBefore) fail(`voting codes changed ${when}`)
+      else ok(`every voting code is exactly as before ${when} (${codesBefore.split('/')[0]})`)
+    }
+    const sameVotes = (when, { codes = true } = {}) => {
+      if (codes) sameCodes(when)
       if (pg.psql('postgres', FINGERPRINT).trim() !== before) fail(`ballots or votes changed ${when}`)
       else ok(`every ballot and vote is exactly as before ${when} (${nb} ballots, ${ns} submitted, ${nv} votes)`)
       if (pg.psql('postgres', RESULTS).trim() !== resultsBefore) fail(`the results changed ${when}`)
@@ -242,6 +254,20 @@ try {
         if (smokeCode !== 'true') fail('self-registration gave the smoke-test voter no voter code')
         else ok('self-registration gave that voter a phone-bound voter code')
       }
+      if (through === '008' && smokeStatus === 'code_required') {
+        // Codes are required on this copy. Switch them off ON THE COPY ONLY,
+        // to exercise self-registration on Production's own data, then back.
+        const self = pg.psql('postgres', `
+          update public.settings set require_voting_code = false where id = 1;
+          select set_config('request.headers', '{"x-forwarded-for":"203.0.113.252"}', false);
+          set role anon;
+          create temp table smoke_self as select public.begin_ballot('Test Rehearsal', '08155500998', null) r;
+          reset role;
+          update public.settings set require_voting_code = true where id = 1;
+          select (r->>'status') || ',' || (r->>'voter_code' ~ '^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$')::text from smoke_self;`).trim().split(/\r?\n/).filter(Boolean).pop()
+        if (self !== 'started,true') fail(`self-registration on this copy (codes optional): ${self}`)
+        else ok('with codes optional (copy only), self-registration starts a ballot with a voter code; switched back')
+      }
       // Remove the synthetic smoke-test ballot (and its voter code, if any).
       pg.psql('postgres', `
         create temp table smoke_codes as
@@ -254,15 +280,26 @@ try {
         if (through === '008') {
           pg.psql('postgres', SELF_REG_DOWN_SQL)
           ok('008 undo runs on the restored copy')
+          sameVotes('after undoing 008')
         }
-        pg.psql('postgres', BALLOT_DOWN_SQL)
-        ok('002 undo runs on the restored copy')
-        pg.psql('postgres', DOWN_SQL)
-        ok('001 undo runs on the restored copy')
-        sameVotes('after rolling back')
-        const back = exists(OLD_SITE)
-        if (back.length) fail(`after rolling back, the live site would miss: ${back.join(', ')}`)
-        else ok('after rolling back, every function the live site calls exists')
+        if (installed.includes('001') || installed.includes('002')) {
+          // 001 and 002 were already live when this backup was taken: rolling
+          // back this release means undoing only what it adds.
+          console.log('info  001 and 002 were already in this backup, so the rollback stops here')
+          const back = exists([...OLD_SITE, ...NEW_SITE])
+          if (back.length) fail(`after undoing 008, missing: ${back.join(', ')}`)
+          else ok('after undoing 008, every function the current site and the previous site call exists')
+        } else {
+          pg.psql('postgres', BALLOT_DOWN_SQL)
+          ok('002 undo runs on the restored copy')
+          pg.psql('postgres', DOWN_SQL)
+          ok('001 undo runs on the restored copy')
+          // 001's undo removes the voting_codes table, so codes are checked after 008's undo above.
+          sameVotes('after rolling back', { codes: false })
+          const back = exists(OLD_SITE)
+          if (back.length) fail(`after rolling back, the live site would miss: ${back.join(', ')}`)
+          else ok('after rolling back, every function the live site calls exists')
+        }
       }
     } catch (e) {
       fail(`the release did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
