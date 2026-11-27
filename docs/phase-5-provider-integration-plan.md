@@ -3,9 +3,18 @@
 **Status (27 Nov 2026):** 5.1–5.3 built in migration 006 and
 `supabase/functions/provider-webhook`, tested locally, **not applied to any
 database and the function is not deployed**. Approved: 5.1, the Edge
-Function, sandbox data only. Still open: liveness only or a 1:N search
-(decision 2), and who owns the DPIA (decision 4). The sandbox adapter is
-liveness-shaped: it carries no face gallery and no scores.
+Function, sandbox data only.
+
+**Decisions (27 Nov 2026):**
+- **Liveness only**, sandbox, with no stored face gallery and no 1:N search
+  (option A). The sandbox adapter already works this way: no gallery, no
+  scores.
+- **The initial release uses the non-biometric youth-leader path** (5.1).
+  Face checks stay development-only, behind the privacy gates.
+- **The project owner and the youth leadership** coordinate the DPIA and
+  the legal review.
+- **Feature work is paused** until 005 and 006 are installed on Development
+  and integration testing is complete.
 
 Phase 5 prepares the system for a real identity-verification provider. It
 does **not** start collecting real biometric data. That only happens after
