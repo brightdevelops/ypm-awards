@@ -53,6 +53,20 @@ describe('voting page: self-registration (simulated browser)', () => {
     }
   })
 
+  it('on a database without 008 (Production today) it works exactly as before, with no code box', async () => {
+    const db = await freshDb({ migrate: '002' })
+    setRpc(db)
+    const view = await start('Test Before008', '08155500954')
+    try {
+      await waitFor(() => text().includes('Choose one'), 'ballot')
+      assert.ok(!text().includes('Your voter code'))
+      assert.equal(stored().voterCode, null)
+      assert.equal((await sql(db, `select count(*)::int n from ballots where voter_phone = '08155500954'`))[0].n, 1)
+    } finally {
+      view.unmount()
+    }
+  })
+
   it('explains a busy network and offers a way through', async () => {
     const db = await freshDb({ migrate: '008' })
     setRpc(db, (fn) => (fn === 'begin_ballot' ? { data: { status: 'rate_limited', reason: 'network' }, error: null } : undefined))
