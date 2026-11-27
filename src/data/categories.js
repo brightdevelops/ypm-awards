@@ -45,7 +45,7 @@ export const SECTIONS = [
         nominees: [
           { name: 'Goodness Emeka' },
           { name: 'Elizabeth Enikanologbon' },
-          { name: 'Favour Ejiogu' },
+          { name: 'Faith Ekong' }, // replaced Favour Ejiogu, 27 Nov 2026
         ],
       },
       {
