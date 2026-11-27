@@ -333,7 +333,21 @@ unless 004's switch is on and `verification_provider = 'simulated'`.
 
 ### Applying 005 to Development (needs your go-ahead)
 
-1. Back up as for 004 (`pg_dump` of `public` and `ypm_private`).
+1. Back up, in your own PowerShell window (password typed only at the
+   prompt; it refuses any project but `vliytvqhjvuhulpvmuat`, and every
+   session it opens is read-only):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\dev-backup.ps1 -Label pre-005
+   node scripts\verify-dev-backup.mjs "<folder it printed>" --expect 004 --rehearse
+   ```
+   The second line must end `BACKUP VERIFIED`. It checks the SHA-256,
+   that the dump holds 001–004's tables and functions and not 005,
+   restores it into a throwaway local server, compares every table's row
+   count, and then installs 005 on that restored copy (a dress rehearsal on
+   Development's own data) and checks no existing row count changed.
+   If the direct host doesn't connect, pass the Session pooler host and
+   user from the dashboard's Connect button (`-DbHost`, `-DbUser`).
+   Encrypt or move the folder as you did for 004's backup.
 2. In your own PowerShell window: `git status --short migrations` prints
    nothing; `git hash-object migrations\005_simulated_provider.sql` prints
    `3d3cad22c4850cdf24bab78c86ca934aa642e7c8`. Anything else: stop.
