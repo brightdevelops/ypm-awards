@@ -49,6 +49,10 @@ export function createVoterApi(rpc) {
         p_delay_seconds: delaySeconds ?? 0,
         p_scenario: scenario,
       }),
+    // Sandbox vendor (migration 006): opens a session; the result arrives
+    // through the provider-webhook function.
+    sandboxStart: (adminSession, token) =>
+      once('sandboxStart', 'dev_sandbox_start', { p_admin_session: adminSession, p_registration_token: token }),
     providerOutbox: (adminSession) => invoke('dev_provider_outbox', { p_admin_session: adminSession }),
     providerCallback: (body, signature) => invoke('dev_provider_callback', { p_body: body, p_signature: signature }),
     adminLogin: (key) => once('adminLogin', 'admin_login', { p_key: key }),

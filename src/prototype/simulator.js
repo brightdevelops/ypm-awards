@@ -45,6 +45,9 @@ export const DELIVERIES = {
   conflict: { label: 'Conflicting second result (goes to review)', scenario: 'conflict', delay: 2 },
   out_of_order: { label: 'Out of order (older result ignored)', scenario: 'out_of_order', delay: 2 },
   instant: { label: 'Instant, no provider (Phase 3 simulator)', scenario: null },
+  // Phase 5: the result comes from the sandbox vendor (scripts/sandbox-vendor.mjs)
+  // through the provider-webhook function, not from the tester's choice above.
+  sandbox: { label: 'Sandbox vendor through the webhook (the vendor script decides)', scenario: 'sandbox', external: true, giveUpAfterMs: 300000 },
 }
 
 // Polling while a provider result is awaited: back off from 1 s to 5 s,

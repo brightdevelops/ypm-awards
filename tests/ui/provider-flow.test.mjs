@@ -42,7 +42,8 @@ async function check(ctx, phone, outcomeId, deliveryId, extra = {}) {
 
 describe('simulated provider, voter page side', () => {
   it('the scenarios and timings the tester can choose', () => {
-    assert.deepEqual(Object.keys(DELIVERIES), ['normal', 'slow', 'duplicate', 'bad_signature', 'never', 'conflict', 'out_of_order', 'instant'])
+    assert.deepEqual(Object.keys(DELIVERIES), ['normal', 'slow', 'duplicate', 'bad_signature', 'never', 'conflict', 'out_of_order', 'instant', 'sandbox'])
+    assert.equal(DELIVERIES.sandbox.external, true, 'the sandbox result comes from the vendor, not the tester')
     assert.equal(DELIVERIES.instant.scenario, null, 'the Phase 3 simulator stays available')
     assert.ok(DELIVERIES.slow.delay * 1000 > VERIFY_TIMING.slowAfterMs, 'slow really triggers "still checking"')
     assert.ok(VERIFY_TIMING.giveUpAfterMs >= 60000)

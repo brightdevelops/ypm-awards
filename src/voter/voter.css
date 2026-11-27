@@ -599,6 +599,12 @@
   user-select: all;
 }
 
+.testerHandover code.sandboxCmd {
+  font-size: 12px;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
 .protoPanel {
   max-height: calc(100dvh - 120px);
   overflow-y: auto;

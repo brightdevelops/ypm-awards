@@ -42,6 +42,7 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
   const [details, setDetails] = useState({ name: '', phone: '' })
   const [outcome, setOutcome] = useState('approved')
   const [delivery, setDelivery] = useState('normal')
+  const [sandboxRef, setSandboxRef] = useState(null) // sandbox session waiting for the vendor
   const [adminSession, setAdminSession] = useState(null) // memory only
   const [voterCode, setVoterCode] = useState(null) // show-once, memory only
   const [voter, setVoter] = useState(null) // { session, expiresAt, firstName }
@@ -416,8 +417,9 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
 
       const res = await runProviderCheck({
         api, adminSession, token: r.token, outcome: o.server, reasonCode: o.reason,
-        delivery: d, timing, onSlow, isCancelled,
+        delivery: d, timing, onSlow, isCancelled, onExternal: setSandboxRef,
       })
+      if (d.external) setSandboxRef(null)
       return res.type === 'status' ? { ...res, lostClaim } : res
     },
     [api, adminSession, outcome, delivery, timing],
@@ -638,6 +640,7 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
         setOutcome={setOutcome}
         delivery={delivery}
         setDelivery={setDelivery}
+        sandboxRef={sandboxRef}
         onRestart={restart}
       />
     </div>

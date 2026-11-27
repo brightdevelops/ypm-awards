@@ -30,12 +30,20 @@ const pause = (ms) => new Promise((res) => setTimeout(res, ms))
 //   { type: 'tester_needed' }    no valid tester session
 //   { type: 'disabled' }         this database doesn't allow it
 //   { type: 'cancelled' }        the screen was left
+//
+// With an external delivery (the sandbox vendor), nothing is relayed: the
+// page opens a sandbox session, hands its reference to onExternal (for the
+// tester to give the vendor script) and waits for the webhook's result.
 export async function runProviderCheck({
-  api, adminSession, token, outcome, reasonCode, delivery, timing, onSlow, isCancelled = () => false,
+  api, adminSession, token, outcome, reasonCode, delivery, timing, onSlow, onExternal, isCancelled = () => false,
 }) {
-  const started = await api.providerStart(adminSession, token, outcome, reasonCode, delivery.delay, delivery.scenario)
+  const started = delivery.external
+    ? await api.sandboxStart(adminSession, token)
+    : await api.providerStart(adminSession, token, outcome, reasonCode, delivery.delay, delivery.scenario)
   if (started.kind === 'unauthorized') return { type: 'tester_needed' }
   if (started.kind === 'answer' && started.status === 'disabled') return { type: 'disabled' }
+  if (delivery.external && started.kind === 'answer' && started.data?.provider_ref) onExternal?.(started.data.provider_ref)
+  const giveUpAfterMs = delivery.giveUpAfterMs ?? timing.giveUpAfterMs
   // Anything else (ok, "already running" after a reload, no reply): carry
   // on and let the status say what happened.
 
@@ -45,7 +53,7 @@ export async function runProviderCheck({
   for (;;) {
     await pause(wait)
     if (isCancelled()) return { type: 'cancelled' }
-    if ((await relayDue(api, adminSession)) === 'unauthorized') return { type: 'tester_needed' }
+    if (!delivery.external && (await relayDue(api, adminSession)) === 'unauthorized') return { type: 'tester_needed' }
     const st = await api.status(token)
     if (st.kind === 'answer' && st.status !== 'pending') return { type: 'status', status: st.status }
     const elapsed = Date.now() - t0
@@ -53,7 +61,7 @@ export async function runProviderCheck({
       slow = true
       onSlow?.()
     }
-    if (elapsed >= timing.giveUpAfterMs) return { type: 'still_pending' }
+    if (elapsed >= giveUpAfterMs) return { type: 'still_pending' }
     wait = Math.min(wait * 2, timing.maxPollMs)
   }
 }

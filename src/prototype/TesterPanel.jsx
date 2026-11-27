@@ -6,7 +6,7 @@ import { DELIVERIES, OUTCOMES } from './simulator.js'
 // and never kept; the admin session lives only in memory (parent state).
 // Outcomes here are simulated choices, not biometric results.
 export default function TesterPanel({
-  api, adminSession, setAdminSession, outcome, setOutcome, delivery, setDelivery, onRestart,
+  api, adminSession, setAdminSession, outcome, setOutcome, delivery, setDelivery, onRestart, sandboxRef = null,
 }) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
@@ -138,6 +138,22 @@ export default function TesterPanel({
           </label>
         ))}
       </fieldset>
+
+      {sandboxRef && (
+        <div className="testerHandover" role="status">
+          <p className="small">
+            Waiting for the sandbox vendor. In a terminal, send its result (no face data; the
+            vendor script decides the outcome):
+          </p>
+          <code className="sandboxCmd">
+            node scripts/sandbox-vendor.mjs --url http://127.0.0.1:8787/functions/v1/provider-webhook --ref {sandboxRef} --status verified
+          </code>
+          <p className="small dim">
+            Liveness failed: <code>--status rejected --reason liveness</code>. Possible duplicate person (the
+            vendor’s claim; goes to review): <code>--status requires_review --reason duplicate</code>.
+          </p>
+        </div>
+      )}
 
       {adminSession && (
         <div className="testerReviews">
