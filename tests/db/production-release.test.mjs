@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  freshDb, call, sql, login, LEGACY, MIGRATION_SQL, BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL,
+  freshDb, call, sql, login, issue, LEGACY, MIGRATION_SQL, BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL,
   VOTER_MIGRATION_SQL, SAFEGUARDS_SQL, PROVIDER_SQL, CHOICE_SQL, CHOICE_DOWN_SQL, LIVE_SQL, LIVE_DOWN_SQL,
   DEV_SIM_SQL,
 } from './helpers.mjs'
@@ -212,5 +212,35 @@ describe('007: re-run, undo, and Development', () => {
     for (const [cv, phone] of [[DEV_CV, '08155500310'], [PROD_CV, '08155500311']]) {
       assert.equal((await call(db, 'voter_request_in_person', { p_name: 'Test Both', p_phone: phone, p_consent_version: cv, p_adult: true })).status, 'ok')
     }
+  })
+})
+
+// Under-18s can't register for a voter account (adults only), so their
+// non-biometric way to vote is the anonymous voting page, with an optional
+// voting code from a leader. Neither asks for age or any biometric data.
+describe('007 on Production: under-18 participants still have a way to vote', () => {
+  it('with voter accounts on and registration Optional: anonymous voting and leader-issued voting codes work', async () => {
+    const { db } = await prodChain()
+    const s = await goLive(db)
+    // Registration refuses under-18s…
+    assert.equal((await call(db, 'voter_request_in_person', { p_name: 'Test Young', p_phone: '08155500320', p_consent_version: PROD_CV, p_adult: false })).status, 'adult_required')
+    // …but the voting page takes them as before: no age question.
+    const n = await nominee(db)
+    const b = await call(db, 'begin_ballot', { p_name: 'Test Young', p_phone: '08155500320', p_code: null })
+    assert.equal(b.status, 'started')
+    assert.equal((await call(db, 'save_vote', { p_ballot_id: b.ballot_id, p_category_id: n.category_id, p_nominee_name: n.name })).status, 'ok')
+    assert.equal((await call(db, 'submit_ballot', { p_ballot_id: b.ballot_id })).status, 'ok')
+    // A leader can issue a voting code for a number (for example one that
+    // needs to continue on another phone).
+    const [code] = await issue(db, s, { phone: '08155500321', note: 'release test' })
+    const c = await call(db, 'begin_ballot', { p_name: 'Test Young Two', p_phone: '08155500321', p_code: code.code })
+    assert.equal(c.status, 'started')
+  })
+
+  it('Required mode would shut them out: new numbers can no longer start a ballot (keep Optional)', async () => {
+    const { db } = await prodChain()
+    const s = await goLive(db)
+    assert.equal((await call(db, 'admin_set_registration_mode', { p_session: s, p_mode: 'required' })).status, 'ok')
+    assert.equal((await call(db, 'begin_ballot', { p_name: 'Test Young', p_phone: '08155500322', p_code: null })).status, 'registration_required')
   })
 })

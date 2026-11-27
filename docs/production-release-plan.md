@@ -1,8 +1,14 @@
 # Production release plan: voter accounts with youth-leader verification
 
-**Status (27 Nov 2026): prepared and tested; nothing done in Production.**
-Waiting for your approval of this plan. No push, merge, deploy or
-Production database change has happened.
+**Status (27 Nov 2026): plan approved; final release preparation done;
+nothing done in Production.** Waiting for your final authorization. No
+push, merge, deploy or Production database change has happened.
+
+**The exact commands are in `docs/release-runbook.md`, which supersedes
+sections B and C below on one point: the release is in two parts.** Part 1
+installs 001–006 and deploys the site (voter accounts stay disabled).
+Part 2 runs 007 only after leadership approves the voter notice, because
+007 publishes that notice as final.
 
 ## What is released
 
@@ -100,7 +106,7 @@ and keep the exact output.
    mid-election. The only visible effect before the new page is live: a
    voter resuming on a *different* device sees "Could not start" for a few
    minutes.
-2. In the Production SQL editor, run steps 1–8 from the table, **each in a
+2. In the Production SQL editor, run steps 1–7 from the table (001–006; 007 waits for Part 2), **each in a
    new blank tab**, copied exactly
    (`Get-Content -Raw -Encoding UTF8 migrations\<file> | Set-Clipboard`).
    Each must say "Success". If one fails, nothing from that file is applied:
@@ -199,7 +205,8 @@ puts back its development-only switch, which turns voter accounts off
 
 **Release day (you, with this procedure)**
 - [ ] A2 code checks · A3 read-only checks · A4 backup with `BACKUP VERIFIED` · A5 blob IDs.
-- [ ] B2 migrations 1–8 · B3 checks · B4 deploy · B5 smoke test.
+- [ ] Part 1 (runbook §4): migrations 001–006 · checks · deploy · smoke test.
+- [ ] Part 2 (runbook §5), after the notice is approved: 007 · switch on · Optional.
 
 **Known limits (accepted for this release)**
 - Under-18 registration isn't available.
