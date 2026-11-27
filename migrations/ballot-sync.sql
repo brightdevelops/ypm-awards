@@ -43,7 +43,7 @@ insert into public.ballot_nominees (category_id, name, position) values
   ('behind-the-scene-hero', 'Kunle Salami', 3),
   ('most-supportive-member', 'Goodness Emeka', 1),
   ('most-supportive-member', 'Elizabeth Enikanologbon', 2),
-  ('most-supportive-member', 'Favour Ejiogu', 3),
+  ('most-supportive-member', 'Faith Ekong', 3),
   ('consistency', 'Nora Oboh', 1),
   ('consistency', 'Blessing Ukuoha', 2),
   ('consistency', 'Ebenezer Obi', 3),
