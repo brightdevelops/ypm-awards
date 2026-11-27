@@ -106,7 +106,8 @@ Get-Content -Raw -Encoding UTF8 migrations\004_voter_safeguards.down.sql | Set-C
   `4CBB783D…1CF16`). The earlier version (commit `17fd447`) did the same
   undo without the 005 check.
 - **If 005 is installed, undo it first** (`005_simulated_provider.down.sql`);
-  this file refuses otherwise and changes nothing.
+  this file refuses otherwise and changes nothing. If 006 is installed too,
+  undo 006 before 005 (005's undo refuses otherwise).
 
 Paste into a new blank tab on Development, check it starts with
 `-- YPM Youth Awards — undo Migration 004.` and ends with `commit;`, nothing

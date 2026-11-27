@@ -1,6 +1,12 @@
 # Phase 5: real verification provider, integration plan
 
-**Status: proposal (27 Nov 2026). Nothing in this document is built.**
+**Status (27 Nov 2026):** 5.1–5.3 built in migration 006 and
+`supabase/functions/provider-webhook`, tested locally, **not applied to any
+database and the function is not deployed**. Approved: 5.1, the Edge
+Function, sandbox data only. Still open: liveness only or a 1:N search
+(decision 2), and who owns the DPIA (decision 4). The sandbox adapter is
+liveness-shaped: it carries no face gallery and no scores.
+
 Phase 5 prepares the system for a real identity-verification provider. It
 does **not** start collecting real biometric data. That only happens after
 the privacy gates in section 2 are met and you approve it separately.
@@ -176,6 +182,38 @@ I'd do it first (5.1).
 4. Who owns the **DPIA** and the **counsel review**, and the vendor
    shortlist criteria: data location, retention, no training on our data,
    a sandbox, deletion API, price.
+
+## Implementation notes (5.1–5.3)
+
+- **5.1 is migration 006** (`voter_request_in_person`,
+  `admin_in_person_requests`, `admin_confirm_in_person`). Requests use
+  provider `in_person` and status `review`, so they appear in the
+  existing queue; they close after 14 days; 005's 30-day clean-up removes
+  them later. No 003/004 function changed.
+- **The dashboard works without a face check configured.** It used to
+  require `verification_provider = 'simulated'`; it now also opens when
+  006's function answers (only on a development database), so in-person
+  requests can always be confirmed.
+- **Same consent version for both paths.** The draft notice
+  (`draft-2026-11-dev`) still describes a face scan. The final notice
+  must describe both paths (gate 3).
+- **5.2 entry point:** `public.provider_webhook_result`, service role only
+  (checked in tests, including after re-running 004 and 005). The sandbox
+  adapter maps vendor statuses and reasons to our codes; unknown reasons
+  become none, extra payload fields (images, scores, names) are dropped
+  and never logged.
+- **5.3 Edge Function** (`supabase/functions/provider-webhook`): POST only,
+  16 KB limit, HMAC-SHA-256 signature over `<timestamp>.<body>`, 5-minute
+  freshness, rotation (several signatures), then the database's own
+  checks (shape, 10-minute freshness, provider match). Replies 200 for
+  duplicates so the vendor stops retrying; 502 when the database can't be
+  reached so it retries (safe: results are idempotent).
+- **Deploying it (needs your approval; not done):** set the function
+  secrets `PROVIDER_ADAPTER=sandbox` and `SANDBOX_WEBHOOK_SECRET` (32+
+  random characters), deploy `provider-webhook` with JWT verification
+  off, on Development only. Then
+  `node scripts/sandbox-vendor.mjs --url https://vliytvqhjvuhulpvmuat.supabase.co/functions/v1/provider-webhook --ref <sbx_…> --status verified`
+  (the script refuses any other project).
 
 ## Out of scope until separately approved
 

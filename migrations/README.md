@@ -11,13 +11,14 @@ is one transaction: it applies fully or not at all.
 | `ballot-sync.sql` | **Generated** (`npm run ballot:sql`). Brings the database ballot in line with `categories.js`. Re-run after every ballot edit. | — |
 | `003_voter_accounts.sql` | Registered voter accounts, voter login codes (keyed hashes, key in Supabase Vault), in-person registration, one ballot per voter. **Registration is off by default.** | `003_voter_accounts.down.sql` |
 | `004_voter_safeguards.sql` | Voter accounts **development only, enforced by the database**; restoring revoked voters with a new code (old codes retired for good); linking a ballot when approving a review; consent records with version tracking; `erase_voter` for deletion. **Installed on Development** (seen through the public API on 26 Nov 2026: 004-only functions and its consent check answer); not on Production. | `004_voter_safeguards.down.sql` (refuses while 005 is installed) |
-| `005_simulated_provider.sql` | **Development only, not applied anywhere yet.** Simulated verification provider with asynchronous, signed results (HMAC, key in Vault): replay, duplicate, out-of-order and conflict handling; review reasons for admins; 30-day retention of verification records (never ballots, votes, accounts or consent). No biometric data. Needs 004. | `005_simulated_provider.down.sql` |
+| `005_simulated_provider.sql` | **Development only, not applied anywhere yet.** Simulated verification provider with asynchronous, signed results (HMAC, key in Vault): replay, duplicate, out-of-order and conflict handling; review reasons for admins; 30-day retention of verification records (never ballots, votes, accounts or consent). No biometric data. Needs 004. | `005_simulated_provider.down.sql` (refuses while 006 is installed) |
+| `006_verification_choice.sql` | **Development only, not applied anywhere yet.** "Verify with a youth leader": a voter asks to be confirmed in person instead of a face check (works with no provider configured) and a leader confirms them from the review queue; a sandbox provider and a service-role-only result entry point for the `provider-webhook` Edge Function (not deployed). No biometric data. Needs 005. | `006_verification_choice.down.sql` |
 | `dev/simulated_verification.sql` | **Development only.** Simulated verification for testing self-registration. Refuses to install or run outside a project marked as development. | Dropped by 003's undo |
 | `dev/revoke-synthetic-test-credentials.md` | **Development only, not run yet.** Step-by-step SQL that revokes the synthetic test voters (`08155500xxx`), ends their sign-ins and closes their open registrations. Deletes nothing; every write checks the project is marked as development. | Not needed (with 004, a revoked account can be restored with a new code) |
 
-Undo in reverse order: 005's undo, then 004's, then 003's, then 002's, then
-001's. 004's undo refuses to run while 005 is installed, and 003's while 004
-is installed.
+Undo in reverse order: 006's undo, then 005's, 004's, 003's, 002's and
+001's. 005's undo refuses to run while 006 is installed, 004's while 005 is,
+and 003's while 004 is.
 
 **Older files refuse to run over newer ones.** 003 moves the original
 `begin_ballot`, `save_vote` and `submit_ballot` into `ypm_private` and puts
@@ -331,35 +332,88 @@ unless 004's switch is on and `verification_provider = 'simulated'`.
   deleted. (003 already removes abandoned pending registrations after a
   day.)
 
-### Applying 005 to Development (needs your go-ahead)
+### Applying 005, then 006, to Development
 
-1. Back up, in your own PowerShell window (password typed only at the
-   prompt; it refuses any project but `vliytvqhjvuhulpvmuat`, and every
-   session it opens is read-only):
+Approved for Development on 27 Nov 2026. Never on Production.
+
+1. **Backup, verified.** In your own PowerShell window (password typed only
+   at the prompt; it refuses any project but `vliytvqhjvuhulpvmuat`, and
+   every session it opens is read-only):
    ```powershell
+   cd C:\Users\Bright\Downloads\ypm-awards
    powershell -ExecutionPolicy Bypass -File scripts\dev-backup.ps1 -Label pre-005
    node scripts\verify-dev-backup.mjs "<folder it printed>" --expect 004 --rehearse
    ```
-   The second line must end `BACKUP VERIFIED`. It checks the SHA-256,
-   that the dump holds 001–004's tables and functions and not 005,
-   restores it into a throwaway local server, compares every table's row
-   count, and then installs 005 on that restored copy (a dress rehearsal on
+   The last line must be `BACKUP VERIFIED`. It checks the SHA-256, that
+   the dump holds 001–004's tables and functions and not 005, restores it
+   into a throwaway local server, compares every table's row count, then
+   installs 005 and 006 on that restored copy (a dress rehearsal on
    Development's own data) and checks no existing row count changed.
-   If the direct host doesn't connect, pass the Session pooler host and
-   user from the dashboard's Connect button (`-DbHost`, `-DbUser`).
-   Encrypt or move the folder as you did for 004's backup.
-2. In your own PowerShell window: `git status --short migrations` prints
-   nothing; `git hash-object migrations\005_simulated_provider.sql` prints
-   `3d3cad22c4850cdf24bab78c86ca934aa642e7c8`. Anything else: stop.
-3. Run `005_simulated_provider.sql` in a new blank tab on Development
-   (address bar shows `vliytvqhjvuhulpvmuat`). Expected: "Success".
-4. Check (read-only):
+   Run the verifier **before** encrypting the folder (or on a decrypted
+   copy). If the direct host doesn't connect, pass the Session pooler host
+   and user from the dashboard's Connect button (`-DbHost`, `-DbUser`).
+2. **Files unchanged.** `git status --short migrations` prints nothing;
+   `git hash-object migrations\005_simulated_provider.sql migrations\006_verification_choice.sql`
+   prints `3d3cad22c4850cdf24bab78c86ca934aa642e7c8` then
+   `3107683616dd8829e90466fea59815e1e59dd41a`. Anything else: stop.
+3. **Health check first** (read-only; SQL editor on Development, address
+   bar shows `vliytvqhjvuhulpvmuat`): the two queries in
+   `dev/undo-004-development.md`, section "Re-running 003 while 004 is
+   installed". Expect `0`, then three `true`s.
+4. **Apply 005.** Copy it exactly:
+   `Get-Content -Raw -Encoding UTF8 migrations\005_simulated_provider.sql | Set-Clipboard`.
+   Paste into a **new blank tab**; check it starts with
+   `-- YPM Youth Awards — Migration 005` and ends with the "Handy queries"
+   comments; nothing highlighted; **Run**. Expected: "Success. No rows
+   returned".
+5. **Check 005** (read-only):
    ```sql
    select to_regclass('ypm_private.provider_sessions') is not null as installed,
           exists (select 1 from vault.decrypted_secrets
                    where name = 'ypm_sim_provider_key') as key_present;
    ```
    Expect `true, true`.
+6. **Apply 006** the same way (`006_verification_choice.sql`, new blank tab,
+   starts with `-- YPM Youth Awards — Migration 006`). Then (read-only):
+   ```sql
+   select to_regclass('ypm_private.in_person_requests') is not null as installed,
+          has_function_privilege('anon',
+            'public.provider_webhook_result(text,text,text,text,text,timestamptz)', 'execute') as anon_can_call;
+   ```
+   Expect `true, false`. If `anon_can_call` is `true`, stop and run
+   `006_verification_choice.down.sql`.
+7. Run step 3's health check again (same results).
+
+A file that fails changes nothing (one transaction). Don't fix the
+database by hand; keep the exact error.
 
 Undo: `005_simulated_provider.down.sql` (keeps every registration, account,
 ballot and vote; leaves the Vault key, which a reinstall reuses).
+
+---
+
+## 006 — verify with a youth leader; sandbox provider (Phase 5, development only)
+
+**No biometric data.**
+
+- **In-person requests** (`voter_request_in_person`). Same checks and
+  limits as online registration (consent version, adults only, 5 an hour
+  per number shared with online registration), but no verification
+  provider is needed. The voter gets a 6-character reference; the request
+  waits in the review queue (provider `in_person`) for 14 days. A leader
+  confirms it in person with `admin_confirm_in_person` (same replies as
+  `admin_resolve_review`, including ballot linking); the account is
+  method `in_person`, like one registered by a leader. 004's
+  `admin_resolve_review` refuses these, and this refuses face-check
+  reviews, so the two paths can't be mixed up.
+- **Sandbox provider.** `dev_sandbox_start` (tester session) opens a
+  sandbox session; the sandbox vendor's signed webhooks go to the
+  `provider-webhook` Edge Function (`supabase/functions/`), which checks
+  the signature and calls `provider_webhook_result`. That function is
+  executable **only by the service role**; 005's result rules apply.
+  Sandbox needs `verification_provider = 'simulated'`, i.e. development.
+- **Stored:** a reference and a time per request
+  (`ypm_private.in_person_requests`). Nothing from a vendor payload beyond
+  outcome, reason code and ids.
+- **Undo** keeps every account, ballot, vote and consent record, closes
+  requests still waiting (status `expired`) and deletes sandbox sessions.

@@ -8,9 +8,9 @@
 // 3. It restores into a throwaway PostgreSQL server on 127.0.0.1 (created in
 //    the temp folder and deleted afterwards; it never connects anywhere
 //    else), and every table has the row count recorded in counts.tsv.
-// 4. --rehearse: then runs migrations/005_simulated_provider.sql on that
-//    restored copy (with a stand-in for Vault) and checks it installs and
-//    changes no existing row: a dress rehearsal on Development's own data.
+// 4. --rehearse: then runs migrations 005 and 006 on that restored copy
+//    (with a stand-in for Vault) and checks they install and change no
+//    existing row: a dress rehearsal on Development's own data.
 //
 // Exit code 0 only if all of that holds. Prints table names and counts,
 // never row contents.
@@ -19,7 +19,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { findPgBin, startCluster } from '../tests/concurrency/pg-cluster.mjs'
-import { VAULT_STUB_SQL, PROVIDER_SQL } from '../tests/db/helpers.mjs'
+import { VAULT_STUB_SQL, PROVIDER_SQL, CHOICE_SQL } from '../tests/db/helpers.mjs'
 
 const dir = process.argv[2]
 const expectIdx = process.argv.indexOf('--expect')
@@ -136,19 +136,22 @@ try {
     try {
       pg.psql('postgres', PROVIDER_SQL)
       ok('005 installs on the restored copy')
+      pg.psql('postgres', CHOICE_SQL)
+      ok('006 installs on the restored copy')
       const after = countAll()
       const changed = [...restored].filter(([t, n]) => after.get(t) !== n).map(([t]) => t)
-      if (changed.length) fail(`005 changed row counts in: ${changed.join(', ')}`)
-      else ok(`005 changed no existing table's row count (${restored.size} tables)`)
+      if (changed.length) fail(`005/006 changed row counts in: ${changed.join(', ')}`)
+      else ok(`005 and 006 changed no existing table's row count (${restored.size} tables)`)
       const check = pg.psql('postgres', `
         select (to_regclass('ypm_private.provider_sessions') is not null)::text || ',' ||
                exists (select 1 from vault.decrypted_secrets where name = 'ypm_sim_provider_key')::text || ',' ||
                (select verification_provider from settings where id = 1) || ',' ||
-               (select environment from ypm_private.deployment);`).trim()
-      console.log(`info  after 005: installed,key_present,provider,environment = ${check}`)
+               (select environment from ypm_private.deployment) || ',' ||
+               (to_regclass('ypm_private.in_person_requests') is not null)::text;`).trim()
+      console.log(`info  after 005+006: installed,key_present,provider,environment,006 = ${check}`)
       if (!check.startsWith('true,')) fail('005 objects missing after install')
     } catch (e) {
-      fail(`005 did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
+      fail(`005/006 did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
     }
   }
 } finally {
