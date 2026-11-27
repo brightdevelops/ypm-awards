@@ -1,0 +1,68 @@
+/* Development-only "Registered voters" tab (Phase 3.4). Loaded with the
+   tab, so it isn't in a production build. Uses the tokens from styles.css. */
+
+.votersTab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.voterCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voterCardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.modeButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reviewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.reviewList li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.reviewList li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.voterHandover {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0;
+  padding: 18px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.voterHandover .codeText {
+  font-size: clamp(18px, 6vw, 24px);
+}
+
+.votersTab .actionCell .adminActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}

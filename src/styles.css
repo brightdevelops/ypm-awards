@@ -32,7 +32,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -445,6 +446,17 @@ input {
   background: rgba(239, 138, 122, 0.16);
   color: var(--err);
 }
+.statPill.neutral {
+  background: var(--surface-2);
+  color: var(--ink-dim);
+}
+
+.adminActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 .tallyCard {
   padding: 18px;
@@ -506,6 +518,43 @@ input {
   background: var(--gold);
   border-radius: 0 4px 4px 0;
   transition: width 0.4s ease;
+}
+
+.tallyNote {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.historical {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.historicalHead {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.historical .dim.small {
+  margin: 0 0 8px;
+}
+
+.historicalList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.historicalList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 14px;
+  color: var(--ink-dim);
 }
 
 .voters {
