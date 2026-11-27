@@ -554,13 +554,19 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
   async function resolve(link = false) {
     await run(async () => {
       setError('')
-      const r = await api.resolveReview(review.id, decision, link)
+      const r = await api.resolveReview(review.id, decision, link, review.provider)
       if (r.kind === 'unauthorized') return
       if (r.kind === 'ok') {
         if (!approve) return onDone(`Registration for ${review.full_name} rejected.`)
         setCode(r.res.voter_code)
         setLinked(r.res.linked_ballot === true)
         return setStep('code')
+      }
+      if (r.kind === 'unexpected' && r.res?.status === 'expired') {
+        return setError('This request closed after 14 days. Register them in person instead (Register someone).')
+      }
+      if (r.kind === 'unexpected' && r.res?.status === 'consent_outdated') {
+        return setError('The privacy notice changed after they asked. Register them in person instead, so they agree to the current notice.')
       }
       if (r.kind === 'unexpected' && r.res?.status === 'adult_required') {
         return setError('Only adults can be registered for now, so this can’t be approved. Reject it instead.')
@@ -682,19 +688,34 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
     )
   }
 
+  const inPerson = review.provider === 'in_person' // migration 006: no face check
   return (
     <Dialog
-      title={approve ? `Approve ${review.full_name}?` : `Reject ${review.full_name}?`}
+      title={approve ? `${inPerson ? 'Confirm' : 'Approve'} ${review.full_name}?` : `Reject ${review.full_name}?`}
       onClose={busy ? () => {} : onClose}
       canDismiss={!busy}
     >
       <dl className="codeFacts">
         <div><dt>Phone</dt><dd>{review.phone}</dd></div>
         <div><dt>Submitted</dt><dd>{formatDateTime(review.created_at)}</dd></div>
-        <div><dt>Flagged by</dt><dd>{review.provider === 'simulated' ? 'Simulated check (not biometric)' : review.provider}</dd></div>
+        {inPerson ? (
+          <>
+            <div><dt>Request</dt><dd>Confirm in person (no face check)</dd></div>
+            {review.reference && <div><dt>Reference</dt><dd>{review.reference}</dd></div>}
+          </>
+        ) : (
+          <div><dt>Flagged by</dt><dd>{review.provider === 'simulated' ? 'Simulated check (not biometric)' : review.provider}</dd></div>
+        )}
       </dl>
       <div className="callout info">
-        {approve ? (
+        {approve && inPerson ? (
+          <p>
+            They asked to register without a face check. Check in person that they are who they
+            say, that the reference on their phone matches, and that they don’t already have an
+            account under another number. Confirming creates their account and shows the code
+            once, for you to hand over.
+          </p>
+        ) : approve ? (
           <p>
             Approving creates their voter account and shows the code once, for you to hand over.
             Check in person that they are who they say, and that they don’t already have an
@@ -710,7 +731,7 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
       {approve && (
         <label className="ackRow">
           <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} data-autofocus />
-          <span>I’ve checked this person in person</span>
+          <span>{inPerson ? 'I’ve checked this person and their reference in person' : 'I’ve checked this person in person'}</span>
         </label>
       )}
       {error && <p className="error" role="alert">{error}</p>}
@@ -724,7 +745,7 @@ export function ResolveReviewDialog({ review, decision, api, adminLabel, onDone,
           onClick={() => resolve(false)}
           disabled={busy || !checked}
         >
-          {busy ? 'Saving…' : approve ? 'Approve and show code' : 'Reject'}
+          {busy ? 'Saving…' : approve ? `${inPerson ? 'Confirm' : 'Approve'} and show code` : 'Reject'}
         </button>
       </div>
     </Dialog>

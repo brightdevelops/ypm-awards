@@ -35,8 +35,13 @@ export default function VotersTab({ adminRpc, adminLabel }) {
   const [reloadKey, setReloadKey] = useState(0)
 
   const loadStats = useCallback(async () => {
-    const r = await api.stats()
+    let r = await api.stats()
     if (r.kind === 'unauthorized') return
+    if (r.kind === 'ok' && r.res.verification_provider !== 'simulated') {
+      // No face check configured: still usable for in-person requests (006).
+      const p = await api.inPersonRequests()
+      r = { ...r, inPerson: p.kind === 'ok' }
+    }
     // A failed refresh keeps the last good figures rather than hiding the tab.
     setStats((prev) => (r.kind === 'ok' || prev?.kind !== 'ok' ? r : prev))
   }, [api])
@@ -87,7 +92,8 @@ export default function VotersTab({ adminRpc, adminLabel }) {
         <p className="historicalHead">Voter management is switched off for this database</p>
         <p className="dim small">
           It is available only on a database marked as development, with simulated verification
-          switched on. Real voter registration isn’t ready for use yet.
+          switched on or in-person requests installed (migration 006). Real voter registration
+          isn’t ready for use yet.
         </p>
       </div>
     )
@@ -226,11 +232,12 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
   const [reviews, setReviews] = useState(null)
   const [details, setDetails] = useState({}) // registration id -> 005 details
   const [late, setLate] = useState([]) // 005: contradicting results after an account was created
+  const [refs, setRefs] = useState({}) // 006: registration id -> in-person reference
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     setError('')
-    const [r, d] = await Promise.all([api.reviews(), api.reviewDetails()])
+    const [r, d, p] = await Promise.all([api.reviews(), api.reviewDetails(), api.inPersonRequests()])
     if (r.kind === 'unauthorized') return
     if (r.kind !== 'ok') return setError('Could not load the reviews. Refresh to try again.')
     setReviews(r.res.reviews || [])
@@ -239,6 +246,7 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
       d.kind === 'ok' ? Object.fromEntries((d.res.reviews || []).map((x) => [x.registration_id, x])) : {},
     )
     setLate(d.kind === 'ok' ? d.res.late_conflicts || [] : [])
+    setRefs(p.kind === 'ok' ? Object.fromEntries((p.res.requests || []).map((x) => [x.registration_id, x.reference])) : {})
   }, [api])
 
   useEffect(() => {
@@ -278,7 +286,9 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
                 <strong>{r.full_name}</strong> <span className="dim">{r.phone}</span>
                 <div className="dim tiny">
                   {formatDateTime(r.created_at)} ·{' '}
-                  {details[r.id]?.reason_code
+                  {r.provider === 'in_person'
+                    ? `Asked to be confirmed in person${refs[r.id] ? ` · reference ${refs[r.id]}` : ''}`
+                    : details[r.id]?.reason_code
                     ? REASON_LABELS[details[r.id].reason_code] ?? details[r.id].reason_code
                     : r.provider === 'simulated'
                       ? 'Simulated “possible duplicate” (not biometric)'
@@ -296,8 +306,8 @@ function ReviewQueue({ api, reloadKey, onDecide }) {
                 <button type="button" className="btn ghost small" onClick={() => onDecide(r, 'reject')}>
                   Reject
                 </button>
-                <button type="button" className="btn primary small" onClick={() => onDecide(r, 'approve')}>
-                  Approve
+                <button type="button" className="btn primary small" onClick={() => onDecide({ ...r, reference: refs[r.id] }, 'approve')}>
+                  {r.provider === 'in_person' ? 'Confirm' : 'Approve'}
                 </button>
               </div>
             </li>

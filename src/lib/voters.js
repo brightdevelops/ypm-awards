@@ -30,7 +30,10 @@ export function voterAccess(isDev, stats) {
   if (stats.kind === 'network') return stats.missing ? 'not_installed' : 'unreachable'
   if (stats.kind === 'unexpected' && stats.res?.status === 'disabled') return 'not_development'
   if (stats.kind !== 'ok') return 'unreachable'
-  if (stats.res.verification_provider !== 'simulated') return 'not_development'
+  // Without the simulated provider, the tab is still needed for in-person
+  // requests (migration 006). stats.inPerson is true only if 006's function
+  // answered, which it does only on a development database.
+  if (stats.res.verification_provider !== 'simulated' && stats.inPerson !== true) return 'not_development'
   return 'ready'
 }
 
@@ -58,8 +61,10 @@ export function createVoterAdmin(adminRpc) {
 
     // p_link_existing_ballot is sent only when linking (004 defaults it to
     // false), so plain approvals also work on a database still at 003.
-    resolveReview: (registrationId, decision, linkExistingBallot = false) =>
-      once(`review:${registrationId}`, 'admin_resolve_review', {
+    // In-person requests (migration 006) are confirmed with their own
+    // function; the replies are the same.
+    resolveReview: (registrationId, decision, linkExistingBallot = false, provider = null) =>
+      once(`review:${registrationId}`, provider === 'in_person' ? 'admin_confirm_in_person' : 'admin_resolve_review', {
         p_registration_id: registrationId,
         p_decision: decision,
         ...(linkExistingBallot === true ? { p_link_existing_ballot: true } : {}),
@@ -89,6 +94,7 @@ export function createVoterAdmin(adminRpc) {
     // answer { kind: 'network', missing: true }, and the tab carries on
     // without the extra detail.
     reviewDetails: () => adminRpc('admin_review_details'),
+    inPersonRequests: () => adminRpc('admin_in_person_requests'),
     purgeVerificationRecords: () => once('purge', 'admin_purge_verification_records'),
   }
 }

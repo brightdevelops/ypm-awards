@@ -43,6 +43,14 @@ export function createVoterApi(rpc) {
         p_consent_version: consentVersion,
         p_adult: adult,
       }),
+    // Migration 006: confirmed by a youth leader instead of a face check.
+    requestInPerson: (name, phone, adult, consentVersion) =>
+      once('inPerson', 'voter_request_in_person', {
+        p_name: name,
+        p_phone: phone,
+        p_consent_version: consentVersion,
+        p_adult: adult,
+      }),
     status: (token) => invoke('voter_registration_status', { p_token: token }),
     claim: (token) => once('claim', 'voter_registration_claim', { p_token: token }),
     login: (code) => once('login', 'voter_login', { p_code: code }),

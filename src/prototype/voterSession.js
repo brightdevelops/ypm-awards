@@ -2,6 +2,8 @@
 //
 //   voter session:      { session, expiresAt, firstName }
 //   registration:       { token, expiresAt, firstName, maskedPhone }
+//                       plus { kind: 'in_person', reference } for a request
+//                       to be confirmed by a youth leader (migration 006)
 //
 // Never stored: voter codes, admin keys, the tester's admin session, full
 // phone numbers. sessionStorage only (cleared when the tab closes).
@@ -52,8 +54,11 @@ export function createSessionStore(storage = browserStorage(), now = () => Date.
     clearVoter: () => write(VOTER_KEY, null),
 
     getRegistration: () => live(REGISTRATION_KEY),
-    setRegistration: ({ token, expiresAt, firstName, maskedPhone }) =>
-      write(REGISTRATION_KEY, { token, expiresAt, firstName: firstName ?? '', maskedPhone: maskedPhone ?? '' }),
+    setRegistration: ({ token, expiresAt, firstName, maskedPhone, kind, reference }) =>
+      write(REGISTRATION_KEY, {
+        token, expiresAt, firstName: firstName ?? '', maskedPhone: maskedPhone ?? '',
+        ...(kind === 'in_person' ? { kind, reference: reference ?? '' } : {}),
+      }),
     clearRegistration: () => write(REGISTRATION_KEY, null),
   }
 }

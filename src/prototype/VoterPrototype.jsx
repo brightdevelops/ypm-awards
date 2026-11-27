@@ -16,6 +16,7 @@ import Success from './screens/Success.jsx'
 import Duplicate from './screens/Duplicate.jsx'
 import Recovery from './screens/Recovery.jsx'
 import Alternative from './screens/Alternative.jsx'
+import InPerson from './screens/InPerson.jsx'
 import Welcome from './screens/Welcome.jsx'
 import Ballot from './screens/Ballot.jsx'
 import Notice from './screens/Notice.jsx'
@@ -188,9 +189,76 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
     }
   }
 
+  // Phase 5.1 (migration 006): ask to be confirmed by a youth leader.
+  async function requestInPerson({ name, phone }) {
+    setDetails({ name, phone })
+    const r = await api.requestInPerson(name, phone, true, CONSENT_VERSION)
+    if (r.kind === 'failed') {
+      return 'We couldn’t confirm whether your request was sent. Check your connection and try again. Each try counts towards a limit of 5 an hour for this number.'
+    }
+    switch (r.status) {
+      case 'ok': {
+        const next = {
+          kind: 'in_person',
+          token: r.data.registration_token,
+          reference: r.data.reference,
+          expiresAt: r.data.expires_at,
+          firstName: name.split(/s+/)[0],
+          maskedPhone: maskPhone(phone),
+        }
+        store.setRegistration(next)
+        setReg(next)
+        go('inperson')
+        return null
+      }
+      case 'adult_required':
+        return 'Registration for under-18s isn’t available yet. Please speak to a youth leader.'
+      case 'needs_assistance':
+        showNotice({
+          title: 'Please see a youth leader',
+          body: 'We can’t take a request for this phone number online. A youth leader can help you in person.',
+          actions: [
+            { label: 'I have a voter code', onClick: () => go('login') },
+            { label: 'Lost my voter code', onClick: () => go('recovery') },
+          ],
+        })
+        return null
+      case 'consent_outdated':
+        return 'The notice has changed since this page loaded. Reload the page and try again.'
+      case 'disabled':
+      case 'registration_off':
+        return 'Registration isn’t open at the moment. A youth leader can still register you in person.'
+      case 'rate_limited':
+        return 'Too many attempts for this number. Please wait an hour and try again.'
+      default:
+        return 'Please check your name and phone number.'
+    }
+  }
+
   const routeStatus = useCallback(
     async (status, { lostClaim = false } = {}) => {
       const restart = { label: 'Start again', onClick: () => go('register') }
+      const inPerson = regRef.current?.kind === 'in_person'
+      if (inPerson && status === 'review') return go('inperson')
+      if (inPerson && status === 'claimed') {
+        dropRegistration()
+        return showNotice({
+          title: 'You’re registered',
+          body: 'A youth leader confirmed you. Sign in with the voter code they gave you.',
+          actions: [
+            { label: 'Sign in', onClick: () => go('login') },
+            { label: 'Lost my voter code', onClick: () => go('recovery') },
+          ],
+        })
+      }
+      if (inPerson && status === 'expired') {
+        dropRegistration()
+        return showNotice({
+          title: 'Your request has closed',
+          body: 'Requests stay open for 14 days. You can ask again, or a youth leader can register you in person.',
+          actions: [{ label: 'Ask again', onClick: () => go('alternative') }],
+        })
+      }
       switch (status) {
         case 'pending':
           return showNotice({
@@ -386,6 +454,16 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
     [routeStatus, showNotice, go, checkRegistration],
   )
 
+  async function inPersonCheck() {
+    const r = regRef.current
+    if (!r) return 'This request is no longer on this device.'
+    const st = await api.status(r.token)
+    if (st.kind !== 'answer') return 'Couldn’t check. Try again in a moment.'
+    if (st.status === 'review') return 'Not yet. Show your reference to a youth leader.'
+    routeStatus(st.status)
+    return null
+  }
+
   async function duplicateCheck() {
     const r = regRef.current
     if (!r) return 'This registration is no longer on this device.'
@@ -476,7 +554,18 @@ export default function VoterPrototype({ api = voterApi, timing = VERIFY_TIMING 
       body = <Recovery go={go} />
       break
     case 'alternative':
-      body = <Alternative go={go} />
+      body = <Alternative go={go} details={details} onRequest={requestInPerson} />
+      break
+    case 'inperson':
+      body = (
+        <InPerson
+          go={go}
+          reference={reg?.reference}
+          maskedPhone={reg?.maskedPhone}
+          expiresAt={reg?.expiresAt}
+          onCheck={inPersonCheck}
+        />
+      )
       break
     case 'welcome':
       body = voter ? (

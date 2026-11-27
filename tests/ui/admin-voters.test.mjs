@@ -565,3 +565,14 @@ describe('the synthetic-credential revocation procedure (not run on any real dat
     assert.equal(Number((await sql(t.db, `select count(*) n from admin_audit where action = 'synthetic_credentials_revoked'`))[0].n), 0)
   })
 })
+
+describe('voterAccess with in-person requests (migration 006)', () => {
+  it('no face check configured: ready only if 006 answered (development only)', () => {
+    const none = { kind: 'ok', res: { verification_provider: 'none' } }
+    assert.equal(voterAccess(true, none), 'not_development')
+    assert.equal(voterAccess(true, { ...none, inPerson: false }), 'not_development')
+    assert.equal(voterAccess(true, { ...none, inPerson: true }), 'ready')
+    assert.equal(voterAccess(false, { ...none, inPerson: true }), 'hidden', 'never in a production build')
+    assert.equal(voterAccess(true, { kind: 'unexpected', res: { status: 'disabled' }, inPerson: true }), 'not_development')
+  })
+})
