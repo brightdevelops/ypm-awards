@@ -1,6 +1,8 @@
 // The ballot. Edit names here, commit, and Vercel redeploys.
-// `photo` is optional — add a filename later (put the image in /public/nominees/)
-// and the card shows the photo instead of the initial.
+// Photos: put peace-williams.jpg (the name in lower case, dashes for spaces)
+// in src/assets/nominees/ and it shows on every card for that person; no
+// edit here needed. `photo` only overrides the file name for one nominee.
+// See src/assets/nominees/README.md.
 //
 // Source: leader's "YPM NOMINATIONS 2026" list, 21 Nov 2026.
 // Youth Personality of the Year and Teenager of the Year are NOT here —
