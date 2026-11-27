@@ -258,12 +258,13 @@ select {
 }
 
 .photoGrid .nominee {
+  container-type: inline-size; /* lets the name size itself to the card */
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
   min-height: 0;
-  padding: 6px 6px 10px;
+  padding: 6px 5px 10px;
   text-align: center;
   border-width: 2px;
   border-radius: 14px;
@@ -347,11 +348,15 @@ select {
 .photoGrid .nomineeName {
   flex: none;
   font-size: 14px;
+  /* Shrink only when the longest word (--longest letters, set per name)
+     wouldn't fit the card: about 0.56em per letter at this weight. Browsers
+     without container units keep 14px. */
+  font-size: min(14px, calc(100cqi / (var(--longest, 1) * 0.58)));
   line-height: 1.25;
   overflow-wrap: break-word;
   hyphens: auto;
   -webkit-hyphens: auto;
-  padding: 0 2px;
+  padding: 0;
 }
 
 /* Very small phones: three columns are too narrow for names like
