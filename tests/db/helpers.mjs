@@ -18,6 +18,8 @@ export const SAFEGUARDS_SQL = readFileSync(root('migrations/004_voter_safeguards
 export const SAFEGUARDS_DOWN_SQL = readFileSync(root('migrations/004_voter_safeguards.down.sql'), 'utf8')
 export const PROVIDER_SQL = readFileSync(root('migrations/005_simulated_provider.sql'), 'utf8')
 export const PROVIDER_DOWN_SQL = readFileSync(root('migrations/005_simulated_provider.down.sql'), 'utf8')
+export const CHOICE_SQL = readFileSync(root('migrations/006_verification_choice.sql'), 'utf8')
+export const CHOICE_DOWN_SQL = readFileSync(root('migrations/006_verification_choice.down.sql'), 'utf8')
 
 // Supabase's API roles, with Supabase's default grants: anon and
 // authenticated get every privilege on new objects in \`public\`, so RLS
@@ -25,10 +27,11 @@ export const PROVIDER_DOWN_SQL = readFileSync(root('migrations/005_simulated_pro
 export const ROLES_SQL = `
   create role anon nologin;
   create role authenticated nologin;
-  grant usage on schema public to anon, authenticated;
-  alter default privileges in schema public grant all on tables    to anon, authenticated;
-  alter default privileges in schema public grant all on sequences to anon, authenticated;
-  alter default privileges in schema public grant all on functions to anon, authenticated;
+  create role service_role nologin;
+  grant usage on schema public to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on tables    to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
 `
 
 // A stand-in for Supabase Vault (the supabase_vault extension): same names,
@@ -66,7 +69,7 @@ export const LEGACY = {
 // '002' = 001, 002 and ballot-sync.sql (before voter accounts);
 // '003' = through 003 (voter accounts, before the 004 safeguards);
 // true = every migration through 004 plus the current ballot-sync.sql;
-// '005' = all of that plus 005 (simulated provider).
+// '005' = all of that plus 005 (simulated provider); '006' = plus 006.
 export async function freshDb({ migrate = true } = {}) {
   const db = new PGlite()
   await db.exec(ROLES_SQL)
@@ -88,13 +91,14 @@ export async function freshDb({ migrate = true } = {}) {
 
   await db.exec(VAULT_STUB_SQL)
   if (migrate) await db.exec(MIGRATION_SQL)
-  if (migrate === true || migrate === '002' || migrate === '003' || migrate === '005') {
+  if (migrate === true || migrate === '002' || migrate === '003' || migrate === '005' || migrate === '006') {
     await db.exec(BALLOT_MIGRATION_SQL)
     await db.exec(BALLOT_SYNC_SQL)
   }
-  if (migrate === true || migrate === '003' || migrate === '005') await db.exec(VOTER_MIGRATION_SQL)
-  if (migrate === true || migrate === '005') await db.exec(SAFEGUARDS_SQL)
-  if (migrate === '005') await db.exec(PROVIDER_SQL)
+  if (migrate === true || migrate === '003' || migrate === '005' || migrate === '006') await db.exec(VOTER_MIGRATION_SQL)
+  if (migrate === true || migrate === '005' || migrate === '006') await db.exec(SAFEGUARDS_SQL)
+  if (migrate === '005' || migrate === '006') await db.exec(PROVIDER_SQL)
+  if (migrate === '006') await db.exec(CHOICE_SQL)
   return db
 }
 

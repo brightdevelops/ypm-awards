@@ -11,10 +11,17 @@
 -- it). To remove it too, on Development only:
 --   delete from vault.secrets where name = 'ypm_sim_provider_key';
 --
--- Run before 004's undo (004's undo refuses while 005 is installed).
+-- Run before 004's undo (004's undo refuses while 005 is installed), and
+-- after 006's undo (this refuses while 006 is installed).
 -- ============================================================
 
 begin;
+
+do $$ begin
+  if to_regclass('ypm_private.in_person_requests') is not null then
+    raise exception 'Migration 006 is installed. Run 006_verification_choice.down.sql first.';
+  end if;
+end; $$;
 
 drop function if exists public.dev_provider_start(text, text, text, text, int, text);
 drop function if exists public.dev_provider_outbox(text);
