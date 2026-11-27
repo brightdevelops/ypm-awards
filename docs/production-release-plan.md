@@ -56,6 +56,12 @@ and keep the exact output.
 
 ### A. Before the day (no Production changes)
 
+0. **Apply 007 on Development first** (safe there: the draft notice stays
+   current and both notices are accepted). Run
+   `007_production_voter_accounts.sql` in a new tab; then
+   `select version, is_current from ypm_private.consent_versions;` shows
+   the draft current and `ypm-register-2026-12-v1` not current. Your manual
+   test groups still pass, and `/voter` (under `npm run dev`) signs voters in.
 1. **Approve the voter notice** in `src/voter/consentNotice.js`: fill in the
    retention period and contact details, then set `CONSENT_APPROVED = true`
    (one commit). Until then the voter page takes no requests. Version
