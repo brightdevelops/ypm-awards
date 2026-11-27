@@ -1,32 +1,45 @@
-// Check a Development backup made by scripts/dev-backup.ps1, offline.
+// Check a backup made by scripts/dev-backup.ps1, offline.
 //
-//   node scripts/verify-dev-backup.mjs <backup folder> [--expect 004|005] [--rehearse]
+//   Development:  node scripts/verify-dev-backup.mjs <folder> [--expect 004|005] [--rehearse]
+//   Production:   node scripts/verify-dev-backup.mjs <folder> --production [--rehearse]
 //
 // 1. backup.dump matches backup.sha256.
-// 2. The dump's table of contents has the tables and functions of
-//    migrations 001–004 (and says whether 005 is in it; --expect checks it).
+// 2. The dump's table of contents has the expected tables and functions
+//    (Development: migrations 001–004; Production: the original tables) and
+//    says which migrations are already in it; --expect checks 005.
 // 3. It restores into a throwaway PostgreSQL server on 127.0.0.1 (created in
 //    the temp folder and deleted afterwards; it never connects anywhere
 //    else), and every table has the row count recorded in counts.tsv.
-// 4. --rehearse: then runs migrations 005 and 006 on that restored copy
-//    (with a stand-in for Vault) and checks they install and change no
+// 4. --rehearse (Development): runs migrations 005 and 006 on that restored
+//    copy (with a stand-in for Vault) and checks they install and change no
 //    existing row: a dress rehearsal on Development's own data.
+//    --rehearse --production: runs every migration not yet installed, in
+//    order (001, 002 + ballot-sync.sql, 003, 004, 005, 006, 007), and checks
+//    that every ballot and vote is exactly as before (a fingerprint of all
+//    of them) and the results are unchanged; that the copy is still
+//    production-marked with voter accounts OFF, no face checks, no simulator
+//    key and the published notice current; and that, as the browser, voter
+//    accounts answer "disabled" while anonymous voting still works.
 //
-// Exit code 0 only if all of that holds. Prints table names and counts,
-// never row contents.
+// Exit code 0 only if all of that holds. Prints table names, counts and
+// fingerprints, never row contents.
 import { createHash } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { findPgBin, startCluster } from '../tests/concurrency/pg-cluster.mjs'
-import { VAULT_STUB_SQL, PROVIDER_SQL, CHOICE_SQL } from '../tests/db/helpers.mjs'
+import {
+  VAULT_STUB_SQL, MIGRATION_SQL, BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL, VOTER_MIGRATION_SQL,
+  SAFEGUARDS_SQL, PROVIDER_SQL, CHOICE_SQL, LIVE_SQL,
+} from '../tests/db/helpers.mjs'
 
 const dir = process.argv[2]
 const expectIdx = process.argv.indexOf('--expect')
 const expect = expectIdx > 0 ? process.argv[expectIdx + 1] : null
 const rehearse = process.argv.includes('--rehearse')
+const production = process.argv.includes('--production')
 if (!dir || !existsSync(join(dir, 'backup.dump'))) {
-  console.error('Usage: node scripts/verify-dev-backup.mjs <folder with backup.dump, backup.sha256, counts.tsv> [--expect 004|005]')
+  console.error('Usage: node scripts/verify-dev-backup.mjs <folder with backup.dump, backup.sha256, counts.tsv> [--expect 004|005] [--production] [--rehearse]')
   process.exit(2)
 }
 
@@ -34,7 +47,8 @@ if (!dir || !existsSync(join(dir, 'backup.dump'))) {
 // count: a difference there is reported but isn't a failure.
 const VOLATILE = new Set(['public.rate_events', 'public.admin_sessions', 'public.voter_sessions'])
 
-const REQUIRED = [
+const REQUIRED_PRODUCTION = ['TABLE public settings', 'TABLE public ballots', 'TABLE public votes']
+const REQUIRED_DEV = [
   'TABLE public settings', 'TABLE public ballots', 'TABLE public votes', 'TABLE public admin_keys',
   'TABLE public voting_codes', 'TABLE public admin_users', 'TABLE public admin_audit',
   'TABLE public ballot_categories', 'TABLE public ballot_nominees',
@@ -44,7 +58,17 @@ const REQUIRED = [
   'FUNCTION public admin_restore_voter', 'FUNCTION ypm_private voter_accounts_enabled',
   'FUNCTION ypm_private save_vote_002', 'FUNCTION ypm_private begin_ballot_001',
 ]
+const REQUIRED = production ? REQUIRED_PRODUCTION : REQUIRED_DEV
 const MARK_005 = 'TABLE ypm_private provider_sessions'
+// What each migration leaves behind, to know how far a copy already is.
+const CHAIN = [
+  ['001', 'TABLE public admin_sessions', [MIGRATION_SQL]],
+  ['002', 'TABLE public ballot_nominees', [BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL]],
+  ['003', 'TABLE public voters', [VOTER_MIGRATION_SQL]],
+  ['004', 'TABLE ypm_private consent_versions', [SAFEGUARDS_SQL]],
+  ['005', MARK_005, [PROVIDER_SQL]],
+  ['006', 'TABLE ypm_private in_person_requests', [CHOICE_SQL]],
+]
 
 let failures = 0
 const fail = (msg) => { failures += 1; console.log(`FAIL  ${msg}`) }
@@ -84,11 +108,29 @@ const has = (entry) => {
 }
 const missing = REQUIRED.filter((e) => !has(e))
 if (missing.length) fail(`missing from the dump: ${missing.join(', ')}`)
-else ok(`all ${REQUIRED.length} required 001–004 objects are in the dump (${toc.length} entries)`)
+else ok(`all ${REQUIRED.length} required ${production ? 'original' : '001–004'} objects are in the dump (${toc.length} entries)`)
 const has005 = has(MARK_005)
-console.log(`info  005 ${has005 ? 'IS' : 'is not'} in this dump`)
+const installed = CHAIN.filter(([, mark]) => has(mark)).map(([id]) => id)
+if (production) console.log(`info  migrations already in this dump: ${installed.length ? installed.join(', ') : 'none'}`)
+else console.log(`info  005 ${has005 ? 'IS' : 'is not'} in this dump`)
 if (expect === '004' && has005) fail('expected a pre-005 backup')
 if (expect === '005' && !has005) fail('expected a backup with 005')
+
+// Every ballot and its votes, and the results, as fingerprints.
+const FINGERPRINT = `
+  select count(*)::text || '/' || count(b.completed_at)::text || '/' ||
+         (select count(*) from public.votes)::text || '/' ||
+         coalesce(md5(string_agg(x.line, ',' order by x.line)), '-')
+    from public.ballots b
+    cross join lateral (
+      select b.id || ':' || coalesce(b.completed_at::text, '-') || ':' ||
+             coalesce(string_agg(v.category_id || '=' || v.nominee_name, ';' order by v.category_id), '') as line
+        from public.votes v where v.ballot_id = b.id) x;`
+const RESULTS = `
+  select coalesce(md5(string_agg(category_id || '=' || nominee_name || ':' || n, ',' order by category_id, nominee_name)), '-')
+    from (select v.category_id, v.nominee_name, count(*) n
+            from public.votes v join public.ballots b on b.id = v.ballot_id
+           where b.completed_at is not null group by 1, 2) t;`
 
 // 3. Restore into a throwaway server and compare counts.
 const recorded = new Map(
@@ -131,8 +173,46 @@ try {
   for (const t of restored.keys()) if (!recorded.has(t)) fail(`${t}: restored but not in counts.tsv`)
   if (!failures) ok(`restored ${restored.size} tables; row counts match (${rows} rows)`)
 
-  if (rehearse && has005) console.log('info  --rehearse skipped: 005 is already in this backup')
-  else if (rehearse) {
+  if (rehearse && production) {
+    const before = pg.psql('postgres', FINGERPRINT).trim()
+    const resultsBefore = pg.psql('postgres', RESULTS).trim()
+    try {
+      for (const [id, mark, files] of [...CHAIN, ['007', null, [LIVE_SQL]]]) {
+        if (mark && installed.includes(id)) continue
+        for (const sqlText of files) pg.psql('postgres', sqlText)
+        ok(`${id} installs on the restored copy`)
+      }
+      const after = pg.psql('postgres', FINGERPRINT).trim()
+      const [nb, ns, nv] = before.split('/')
+      if (after !== before) fail(`ballots or votes changed: ${before.split('/').slice(0, 3).join('/')} → ${after.split('/').slice(0, 3).join('/')}`)
+      else ok(`every ballot and vote is exactly as before (${nb} ballots, ${ns} submitted, ${nv} votes)`)
+      if (pg.psql('postgres', RESULTS).trim() !== resultsBefore) fail('the results (submitted votes per nominee) changed')
+      else ok('the results (submitted votes per nominee) are unchanged')
+      const state = pg.psql('postgres', `
+        select (select environment from ypm_private.deployment) || ',' ||
+               (select voter_accounts_live from ypm_private.deployment)::text || ',' ||
+               (select verification_provider from public.settings where id = 1) || ',' ||
+               (select registration_mode from public.settings where id = 1) || ',' ||
+               exists (select 1 from vault.secrets where name = 'ypm_sim_provider_key')::text || ',' ||
+               coalesce((select version from ypm_private.consent_versions where is_current), '-');`).trim()
+      console.log(`info  environment,live,provider,registration,sim_key,notice = ${state}`)
+      if (state !== 'production,false,none,off,false,ypm-register-2026-12-v1') fail(`unexpected state after the chain: ${state}`)
+      else ok('still Production: voter accounts off, no face checks, no simulator key, published notice current')
+      const smoke = pg.psql('postgres', `
+        select set_config('request.headers', '{"x-forwarded-for":"203.0.113.250"}', false);
+        set role anon;
+        select (public.voter_request_in_person('Test Rehearsal', '08155500999', 'ypm-register-2026-12-v1', true)->>'status') || ',' ||
+               (public.begin_ballot('Test Rehearsal', '08155500998', null)->>'status');
+        reset role;`).trim().split(/\r?\n/).filter(Boolean).pop()
+      console.log(`info  as the browser: voter request, anonymous ballot = ${smoke}`)
+      if (smoke !== 'disabled,started') fail(`expected disabled,started, got ${smoke}`)
+      else ok('voter accounts answer "disabled" until switched on; anonymous voting still works')
+    } catch (e) {
+      fail(`the chain did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
+    }
+  } else if (rehearse && has005) {
+    console.log('info  --rehearse skipped: 005 is already in this backup')
+  } else if (rehearse) {
     try {
       pg.psql('postgres', PROVIDER_SQL)
       ok('005 installs on the restored copy')

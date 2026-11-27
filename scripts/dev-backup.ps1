@@ -18,17 +18,38 @@
 #   counts.tsv     row count of every table, taken just after the dump
 #   backup.sha256  SHA-256 of backup.dump
 # Then check it offline:  node scripts\verify-dev-backup.mjs <that folder>
+#
+# PRODUCTION (read-only backup before the release):
+#   ... -File scripts\dev-backup.ps1 -Production -ProjectRef <production ref> -Label pre-release
+#   (with the Session pooler -DbHost / -DbUser from the Production dashboard
+#   if the direct host doesn't connect). You type the ref again to confirm.
+#   Writes to %USERPROFILE%\ypm-backups\prod-<label>-<time>\.
 param(
   [string]$Label = 'pre-005',
-  [string]$DbHost = 'db.vliytvqhjvuhulpvmuat.supabase.co',
+  [string]$DbHost = '',
   [string]$DbUser = 'postgres',
-  [int]$Port = 5432
+  [int]$Port = 5432,
+  [switch]$Production,
+  [string]$ProjectRef = ''
 )
 $ErrorActionPreference = 'Stop'
-$Ref = 'vliytvqhjvuhulpvmuat'
+$DevRef = 'vliytvqhjvuhulpvmuat'
+
+if ($Production) {
+  if ($ProjectRef -notmatch '^[a-z0-9]{20}$') { throw 'Give the Production project ref (20 letters/digits) with -ProjectRef.' }
+  if ($ProjectRef -eq $DevRef) { throw 'That is the Development project. Leave out -Production.' }
+  $Ref = $ProjectRef
+  $Kind = 'prod'
+  $typed = Read-Host "PRODUCTION backup (read-only). Type the project ref again to confirm"
+  if ($typed -ne $Ref) { throw 'The ref you typed does not match. Nothing was done.' }
+} else {
+  $Ref = $DevRef
+  $Kind = 'dev'
+}
+if (-not $DbHost) { $DbHost = "db.$Ref.supabase.co" }
 
 if (($DbHost + ' ' + $DbUser) -notmatch $Ref) {
-  throw "Refusing: neither the host nor the user names the Development project ($Ref)."
+  throw "Refusing: neither the host nor the user names the project $Ref."
 }
 if ($Label -notmatch '^[a-z0-9-]+$') { throw 'Label: lower-case letters, digits and dashes only.' }
 
@@ -37,10 +58,11 @@ $bin = Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object { [i
   Select-Object -First 1
 if (-not $bin) { throw 'pg_dump.exe not found under C:\Program Files\PostgreSQL.' }
 
-$out = Join-Path $env:USERPROFILE ("ypm-backups\dev-$Label-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$out = Join-Path $env:USERPROFILE ("ypm-backups\$Kind-$Label-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $out | Out-Null
 
-$secure = Read-Host "Development database password for $DbUser@$DbHost" -AsSecureString
+$what = if ($Production) { 'PRODUCTION' } else { 'Development' }
+$secure = Read-Host "$what database password for $DbUser@$DbHost" -AsSecureString
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
   $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)

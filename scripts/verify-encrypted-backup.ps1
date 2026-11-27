@@ -20,7 +20,8 @@
 # the end, even if verification fails. The encrypted original is only read.
 param(
   [Parameter(Mandatory = $true)][string]$Backup,
-  [string]$Expect = '004'
+  [string]$Expect = '004',
+  [switch]$Production   # a Production backup: rehearse the whole release chain on it
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -72,7 +73,8 @@ try {
   $missing = @('backup.sha256', 'counts.tsv') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $dir $_)) }
   if ($missing) { throw ("Missing next to backup.dump: " + ($missing -join ', ') + '. The verifier needs all three files.') }
 
-  & node (Join-Path $repo 'scripts\verify-dev-backup.mjs') $dir --expect $Expect --rehearse
+  if ($Production) { & node (Join-Path $repo 'scripts\verify-dev-backup.mjs') $dir --production --rehearse }
+  else { & node (Join-Path $repo 'scripts\verify-dev-backup.mjs') $dir --expect $Expect --rehearse }
   $exit = $LASTEXITCODE
 } finally {
   if ($tmp -and (Test-Path -LiteralPath $tmp)) {
