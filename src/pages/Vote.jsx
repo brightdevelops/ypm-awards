@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient.js'
 import { BALLOT } from '../data/categories.js'
 import { normalizePhone, isValidPhone } from '../lib/phone.js'
 import { START_REFUSALS, SUBMIT_MESSAGES, isAccountBallot, submitOutcome } from '../lib/ballotMessages.js'
+import { initials, photoFor } from '../lib/photos.js'
 
 const STORE_KEY = 'ypm-awards-ballot-v1'
 const ANNOUNCE = '19 December'
@@ -31,13 +32,20 @@ function clearLocal() {
   }
 }
 
-function initials(name) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join('')
+// A nominee's photo, or their initials when there isn't one (or it fails to load).
+function Portrait({ nominee, className = 'portrait' }) {
+  const url = photoFor(nominee)
+  const [failed, setFailed] = useState(false)
+  const show = url && !failed
+  return (
+    <span className={`${className}${show ? '' : ' noPhoto'}`}>
+      {show ? (
+        <img src={url} alt="" decoding="async" onError={() => setFailed(true)} />
+      ) : (
+        <span className="initials">{initials(nominee.name)}</span>
+      )}
+    </span>
+  )
 }
 
 export default function Vote() {
@@ -55,6 +63,7 @@ export default function Vote() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [justPicked, setJustPicked] = useState(null)
+  const [fromReview, setFromReview] = useState(false) // changing one pick from the review screen
   const [voterCode, setVoterCode] = useState(null) // self-registration (migration 008): shown to the voter
   const advanceTimer = useRef(null)
   const accountBallot = useRef(false) // a youth leader linked this ballot to a voter account
@@ -99,6 +108,21 @@ export default function Vote() {
       if (advanceTimer.current) clearTimeout(advanceTimer.current)
     }
   }, [])
+
+  // A new screen or category starts at the top (matters on short phones).
+  useEffect(() => {
+    if (typeof window.scrollTo === 'function') window.scrollTo(0, 0)
+  }, [view, index])
+
+  // Fetch the next category's photos in the background, so they're already
+  // there when the voter moves on.
+  useEffect(() => {
+    if (view !== 'voting' || typeof Image === 'undefined') return
+    for (const n of BALLOT[index + 1]?.nominees || []) {
+      const url = photoFor(n)
+      if (url) new Image().src = url
+    }
+  }, [view, index])
 
   function persist(next) {
     saveLocal({
@@ -240,9 +264,24 @@ export default function Vote() {
     advanceTimer.current = setTimeout(() => {
       setJustPicked(null)
       if (accountBallot.current) return
-      if (index + 1 >= BALLOT.length) setView('review')
-      else setIndex(index + 1)
+      next()
     }, 300)
+  }
+
+  // Forward one category, or back to the review screen when the voter came
+  // from there to change a single pick (no walking through the rest again).
+  function next() {
+    if (fromReview || index + 1 >= BALLOT.length) {
+      setFromReview(false)
+      setView('review')
+    } else {
+      setIndex(index + 1)
+    }
+  }
+
+  function back() {
+    setFromReview(false)
+    if (index > 0) setIndex(index - 1)
   }
 
   async function submitBallot() {
@@ -349,6 +388,11 @@ export default function Vote() {
         <div className="card center">
           <Crest />
           <h1 className="display">Your vote is in</h1>
+          {Object.keys(picks).length > 0 && (
+            <p className="doneCount">
+              You voted in {BALLOT.filter((c) => picks[c.id]).length} of {BALLOT.length} categories
+            </p>
+          )}
           <p className="dim">
             Thank you for voting. Winners will be announced on {ANNOUNCE}.
           </p>
@@ -379,6 +423,7 @@ export default function Vote() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Full name"
                 autoComplete="name"
+                autoCapitalize="words"
               />
             </label>
             <label>
@@ -457,10 +502,17 @@ export default function Vote() {
                   className="reviewRow"
                   onClick={() => {
                     setIndex(i)
+                    setFromReview(true)
                     setView('voting')
                   }}
                 >
                   <span className="reviewCat">{c.name}</span>
+                  {picks[c.id] && (
+                    <Portrait
+                      nominee={c.nominees.find((n) => n.name === picks[c.id]) || { name: picks[c.id] }}
+                      className="thumb"
+                    />
+                  )}
                   <span className={picks[c.id] ? 'reviewPick' : 'reviewPick empty'}>
                     {picks[c.id] || 'Not voted'}
                   </span>
@@ -488,7 +540,8 @@ export default function Vote() {
 
   // view === 'voting'
   const category = BALLOT[index]
-  const progress = ((index + (picks[category.id] ? 1 : 0)) / BALLOT.length) * 100
+  const answered = BALLOT.filter((c) => picks[c.id]).length
+  const progress = (answered / BALLOT.length) * 100
 
   return (
     <Shell>
@@ -506,52 +559,43 @@ export default function Vote() {
 
       {index === 0 && <VoterCodeNote code={voterCode} />}
 
-      <div className="card">
+      <div className="card cardIn" key={category.id}>
         <h1 className="categoryName">{category.name}</h1>
         <p className="dim small">Choose one</p>
 
-        <div className="nominees">
+        <div
+          className={`nominees photoGrid${picks[category.id] ? ' hasPick' : ''}`}
+          style={{ '--cols': Math.min(category.nominees.length, 3) }}
+        >
           {category.nominees.map((n) => {
             const selected = picks[category.id] === n.name
             return (
               <button
-                key={n.name}
+                key={`${category.id}:${n.name}`}
                 className={`nominee${selected ? ' selected' : ''}${
                   justPicked === n.name ? ' flash' : ''
                 }`}
+                aria-pressed={selected}
                 onClick={() => choose(category, n.name)}
               >
-                <span className="avatar">
-                  {n.photo ? (
-                    <img src={`/nominees/${n.photo}`} alt="" />
-                  ) : (
-                    initials(n.name)
-                  )}
+                <span className="portraitWrap">
+                  <Portrait nominee={n} />
+                  <span className="tick" aria-hidden="true">
+                    {selected ? '✓' : ''}
+                  </span>
                 </span>
                 <span className="nomineeName">{n.name}</span>
-                <span className="tick" aria-hidden="true">
-                  {selected ? '✓' : ''}
-                </span>
               </button>
             )
           })}
         </div>
 
         <div className="navRow">
-          <button
-            className="btn ghost"
-            onClick={() => (index === 0 ? null : setIndex(index - 1))}
-            disabled={index === 0}
-          >
+          <button className="btn ghost" onClick={back} disabled={index === 0}>
             Back
           </button>
-          <button
-            className="btn ghost"
-            onClick={() =>
-              index + 1 >= BALLOT.length ? setView('review') : setIndex(index + 1)
-            }
-          >
-            {picks[category.id] ? 'Next' : 'Skip'}
+          <button className="btn ghost" onClick={next}>
+            {fromReview ? 'Back to review' : picks[category.id] ? 'Next' : 'Skip'}
           </button>
         </div>
 
@@ -563,7 +607,13 @@ export default function Vote() {
         )}
       </div>
 
-      <button className="linkBtn" onClick={() => setView('review')}>
+      <button
+        className="linkBtn"
+        onClick={() => {
+          setFromReview(false)
+          setView('review')
+        }}
+      >
         Review all {BALLOT.length} categories
       </button>
     </Shell>

@@ -92,16 +92,17 @@ Removed nominees are switched off, not deleted, so votes already cast for them
 stay in the tally. Renaming someone counts as removing the old name and adding
 the new one.
 
-To add photos later: drop images into `public/nominees/` and add the filename to
-the nominee:
+### Nominee photos
 
-```js
-{ name: 'Peace Williams', photo: 'peace-williams.jpg' }
-```
+Each category shows its nominees as photo cards. Put one photo per person in
+**`src/assets/nominees/`**, named after them: Peace Williams is
+`peace-williams.jpg`. It appears in every category they're in, with no code
+or SQL change. Head-and-shoulders, about 600×750 pixels, under 300 KB each.
+Anyone without a photo shows their initials, which works, but a mix of photos
+and initials looks uneven, so aim to have them all.
 
-Square images, roughly 400×400. Without a photo the card shows the person's
-initials, which looks deliberate — you don't need photos for all of them, but
-mixing some with and some without will look uneven.
+`npm test` catches misnamed and oversized photos and lists who's still
+missing one. Details: [src/assets/nominees/README.md](src/assets/nominees/README.md).
 
 ---
 
