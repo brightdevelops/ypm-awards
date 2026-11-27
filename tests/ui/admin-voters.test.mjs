@@ -485,10 +485,10 @@ describe('the tab keeps codes and numbers to itself', () => {
     }
   })
 
-  it('is loaded lazily, and only the database switches it on (no build flag)', () => {
+  it('is loaded only in development builds (release/voting-codes has no voter accounts)', () => {
     const admin = readFileSync(root('src/pages/Admin.jsx'), 'utf8')
-    assert.match(admin, /const VotersTab = lazy\(/)
-    assert.ok(!/VITE_/.test(admin), 'no environment variable switches it on or off')
+    assert.match(admin, /const VotersTab = import\.meta\.env\.DEV \? lazy\(/)
+    assert.ok(!/VITE_/.test(admin), 'no environment variable can switch it on')
     for (const f of ['src/App.jsx', 'src/pages/Vote.jsx', 'src/components/admin/CodesTab.jsx']) {
       assert.ok(!/VotersTab|lib\/voters/.test(readFileSync(root(f), 'utf8')), f)
     }

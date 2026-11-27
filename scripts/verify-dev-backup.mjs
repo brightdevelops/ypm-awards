@@ -30,7 +30,7 @@ import { join } from 'node:path'
 import { findPgBin, startCluster } from '../tests/concurrency/pg-cluster.mjs'
 import {
   VAULT_STUB_SQL, MIGRATION_SQL, BALLOT_MIGRATION_SQL, BALLOT_SYNC_SQL, VOTER_MIGRATION_SQL,
-  SAFEGUARDS_SQL, PROVIDER_SQL, CHOICE_SQL, LIVE_SQL,
+  SAFEGUARDS_SQL, PROVIDER_SQL, CHOICE_SQL, LIVE_SQL, DOWN_SQL, BALLOT_DOWN_SQL,
 } from '../tests/db/helpers.mjs'
 
 const dir = process.argv[2]
@@ -38,6 +38,11 @@ const expectIdx = process.argv.indexOf('--expect')
 const expect = expectIdx > 0 ? process.argv[expectIdx + 1] : null
 const rehearse = process.argv.includes('--rehearse')
 const production = process.argv.includes('--production')
+// --through 002: rehearse only 001, 002 and ballot-sync.sql (the
+// voting-codes release). --rollback: then undo them (002, then 001).
+const throughIdx = process.argv.indexOf('--through')
+const through = throughIdx > 0 ? process.argv[throughIdx + 1] : '007'
+const rollback = process.argv.includes('--rollback')
 if (!dir || !existsSync(join(dir, 'backup.dump'))) {
   console.error('Usage: node scripts/verify-dev-backup.mjs <folder with backup.dump, backup.sha256, counts.tsv> [--expect 004|005] [--production] [--rehearse]')
   process.exit(2)
@@ -173,7 +178,71 @@ try {
   for (const t of restored.keys()) if (!recorded.has(t)) fail(`${t}: restored but not in counts.tsv`)
   if (!failures) ok(`restored ${restored.size} tables; row counts match (${rows} rows)`)
 
-  if (rehearse && production) {
+  if (rehearse && production && through === '002') {
+    // The voting-codes release: 001, 002 + ballot-sync.sql only.
+    const TABLES = `select string_agg(table_name, ',' order by table_name) from information_schema.tables
+                     where table_schema = 'public' and table_type = 'BASE TABLE';`
+    // Functions the live site (main) calls, and those the new site calls.
+    const OLD_SITE = ['start_ballot(text,text)', 'save_vote(uuid,text,text)', 'submit_ballot(uuid)',
+      'get_tally(text)', 'set_voting_open(text,boolean)', 'voting_status()']
+    const NEW_SITE = ['begin_ballot(text,text,text,uuid)', 'admin_login(text)', 'admin_dashboard(text)',
+      'admin_set_voting_open(text,boolean)', 'admin_set_code_required(text,boolean)',
+      'admin_issue_codes(text,integer,text,text,integer)', 'admin_list_codes(text)', 'admin_revoke_code(text,uuid)']
+    const exists = (sigs) => sigs.filter((f) => pg.psql('postgres', `select to_regprocedure('public.${f}') is not null;`).trim() !== 't')
+    const tablesBefore = pg.psql('postgres', TABLES).trim().split(',')
+    const before = pg.psql('postgres', FINGERPRINT).trim()
+    const resultsBefore = pg.psql('postgres', RESULTS).trim()
+    const [nb, ns, nv] = before.split('/')
+    const sameVotes = (when) => {
+      if (pg.psql('postgres', FINGERPRINT).trim() !== before) fail(`ballots or votes changed ${when}`)
+      else ok(`every ballot and vote is exactly as before ${when} (${nb} ballots, ${ns} submitted, ${nv} votes)`)
+      if (pg.psql('postgres', RESULTS).trim() !== resultsBefore) fail(`the results changed ${when}`)
+      else ok(`the results (submitted votes per nominee) are unchanged ${when}`)
+      const now = pg.psql('postgres', TABLES).trim().split(',')
+      const gone = tablesBefore.filter((t) => !now.includes(t))
+      if (gone.length) fail(`tables missing ${when}: ${gone.join(', ')}`)
+      else ok(`no existing table was removed ${when} (${tablesBefore.length} tables)`)
+    }
+    try {
+      for (const [id, mark, files] of CHAIN.filter(([id]) => id <= '002')) {
+        if (installed.includes(id)) continue
+        for (const sqlText of files) pg.psql('postgres', sqlText)
+        ok(`${id === '002' ? '002 + ballot-sync.sql' : id} installs on the restored copy`)
+      }
+      sameVotes('after installing')
+      if (has('TABLE public voters') || pg.psql('postgres', `select to_regclass('public.voters') is not null;`).trim() === 't') {
+        fail('voter accounts (003) are present; this release must not include them')
+      } else ok('no voter accounts (003–007) and nothing biometric installed')
+      const missingNew = exists(NEW_SITE)
+      if (missingNew.length) fail(`the new site needs: ${missingNew.join(', ')}`)
+      else ok(`every function the new site calls exists (${NEW_SITE.length})`)
+      const missingOld = exists(OLD_SITE)
+      if (missingOld.length) fail(`the live site (main) would break: ${missingOld.join(', ')}`)
+      else ok(`every function the live site calls still exists (${OLD_SITE.length}): rolling the site back is safe`)
+      const smoke = pg.psql('postgres', `
+        select set_config('request.headers', '{"x-forwarded-for":"203.0.113.250"}', false);
+        set role anon;
+        select (public.begin_ballot('Test Rehearsal', '08155500998', null)->>'status');
+        reset role;`).trim().split(/\r?\n/).filter(Boolean).pop()
+      if (!['started', 'code_required'].includes(smoke)) fail(`anonymous ballot as the browser: ${smoke}`)
+      else ok(`as the browser, starting a ballot answers "${smoke}" (codes ${smoke === 'started' ? 'optional' : 'required'} on this copy)`)
+      pg.psql('postgres', `delete from public.votes where ballot_id in (select id from public.ballots where voter_phone = '08155500998');
+                           delete from public.ballots where voter_phone = '08155500998';`)
+
+      if (rollback) {
+        pg.psql('postgres', BALLOT_DOWN_SQL)
+        ok('002 undo runs on the restored copy')
+        pg.psql('postgres', DOWN_SQL)
+        ok('001 undo runs on the restored copy')
+        sameVotes('after rolling back')
+        const back = exists(OLD_SITE)
+        if (back.length) fail(`after rolling back, the live site would miss: ${back.join(', ')}`)
+        else ok('after rolling back, every function the live site calls exists')
+      }
+    } catch (e) {
+      fail(`the release did not install on the restored copy: ${String(e.message).split('\n').slice(0, 4).join(' | ')}`)
+    }
+  } else if (rehearse && production) {
     const before = pg.psql('postgres', FINGERPRINT).trim()
     const resultsBefore = pg.psql('postgres', RESULTS).trim()
     try {

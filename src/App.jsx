@@ -10,10 +10,9 @@ const VoterPrototype = import.meta.env.DEV
   ? lazy(() => import('./prototype/VoterPrototype.jsx'))
   : null
 
-// The voter page (/voter): registered voters sign in with their code; new
-// voters ask a youth leader to confirm them (no face scan). The database
-// decides whether it's switched on (migration 007).
-const VoterApp = lazy(() => import('./voter/VoterApp.jsx'))
+// The voter page (/voter) needs voter accounts (migrations 003–007), which
+// this release doesn't include: development builds only, like the prototype.
+const VoterApp = import.meta.env.DEV ? lazy(() => import('./voter/VoterApp.jsx')) : null
 
 export default function App() {
   // Both doors show the same dashboard; each has its own key (see admin_keys).
@@ -42,7 +41,7 @@ export default function App() {
     )
   }
 
-  if (path === '/voter') {
+  if (VoterApp && path === '/voter') {
     return (
       <Suspense fallback={<div className="shell"><div className="card center dim">Loading…</div></div>}>
         <VoterApp />
