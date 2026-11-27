@@ -13,10 +13,19 @@
 -- provider sessions are deleted (their delivery log stays until 005's
 -- 30-day clean-up).
 --
--- Run before 005's undo (005's undo refuses while 006 is installed).
+-- Run before 005's undo (005's undo refuses while 006 is installed), and
+-- after 007's undo (this refuses while 007 is installed).
 -- ============================================================
 
 begin;
+
+do $$ begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'ypm_private' and table_name = 'deployment'
+                and column_name = 'voter_accounts_live') then
+    raise exception 'Migration 007 is installed. Run 007_production_voter_accounts.down.sql first.';
+  end if;
+end; $$;
 
 drop function if exists public.voter_request_in_person(text, text, text, boolean);
 drop function if exists public.admin_in_person_requests(text);
