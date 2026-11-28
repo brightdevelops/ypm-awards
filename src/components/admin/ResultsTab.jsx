@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BALLOT } from '../../data/categories.js'
 import { buildResults } from '../../lib/tally.js'
 import { maskPhone } from '../../lib/codes.js'
+import { hasIpData, sharedIpVoters } from '../../lib/ipGroups.js'
 
 export const votesLabel = (n) => `${n} ${n === 1 ? 'vote' : 'votes'}`
 
@@ -9,6 +10,11 @@ export const votesLabel = (n) => `${n} ${n === 1 ? 'vote' : 'votes'}`
 // numbers are masked (display only; the server still sends them).
 export default function ResultsTab({ data }) {
   const [showVoters, setShowVoters] = useState(false)
+  const [sharedOnly, setSharedOnly] = useState(false)
+  const voters = data.voters || []
+  const withIp = hasIpData(voters)
+  const shared = sharedIpVoters(voters)
+  const listed = sharedOnly ? shared : voters
   const results = buildResults(BALLOT, data.tally)
   const { totals } = results
 
@@ -106,7 +112,7 @@ export default function ResultsTab({ data }) {
 
       <div className="card">
         <button className="linkBtn left" onClick={() => setShowVoters((s) => !s)}>
-          {showVoters ? 'Hide' : 'Show'} voter list ({(data.voters || []).length})
+          {showVoters ? 'Hide' : 'Show'} voter list ({voters.length})
         </button>
         {showVoters && (
           <>
@@ -114,12 +120,54 @@ export default function ResultsTab({ data }) {
               Phone numbers are shortened on screen. This is display only: the full numbers
               still reach this browser.
             </p>
+            {withIp && (
+              <>
+                <p className="dim small maskNote">
+                  IP address is where each ballot was started. Many people can share one
+                  (church Wi-Fi, mobile networks), so a shared address is a reason to look
+                  closer, not proof. Ballots started before IPs were recorded show none.
+                </p>
+                <div className="chips ipFilter" role="group" aria-label="Which voters to show">
+                  <button
+                    type="button"
+                    className={`chip${sharedOnly ? '' : ' on'}`}
+                    aria-pressed={!sharedOnly}
+                    onClick={() => setSharedOnly(false)}
+                  >
+                    All ({voters.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip${sharedOnly ? ' on' : ''}`}
+                    aria-pressed={sharedOnly}
+                    onClick={() => setSharedOnly(true)}
+                  >
+                    Same IP as someone else ({shared.length})
+                  </button>
+                </div>
+              </>
+            )}
+            {sharedOnly && shared.length === 0 && (
+              <p className="dim small">No IP address has more than one ballot.</p>
+            )}
             <ul className="voters">
-              {(data.voters || []).map((v, i) => (
-                <li key={i}>
+              {listed.map((v, i) => (
+                <li
+                  key={i}
+                  className={
+                    sharedOnly && i > 0 && listed[i - 1].voter_ip !== v.voter_ip ? 'ipGroupStart' : undefined
+                  }
+                >
                   <span>{v.voter_name}</span>
-                  <span className="dim small">
+                  <span className="dim small voterMeta">
                     {maskPhone(v.voter_phone)} · {v.completed_at ? 'submitted' : 'in progress'}
+                    {withIp && (
+                      <>
+                        {' · '}
+                        {v.voter_ip ? <code className="ip">{v.voter_ip}</code> : 'no IP'}
+                        {v.ip_count > 1 && <span className="ipShared"> {v.ip_count} on this IP</span>}
+                      </>
+                    )}
                   </span>
                 </li>
               ))}

@@ -642,3 +642,33 @@
     line-height: 1.4;
   }
 }
+
+/* Voter list: IP addresses (migration 009) */
+.ipFilter {
+  margin: 10px 0 4px;
+}
+
+.voterMeta {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.voters code.ip {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.ipShared {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(232, 178, 96, 0.15);
+  color: var(--warn);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.voters li.ipGroupStart {
+  border-top: 2px solid var(--line);
+  margin-top: 6px;
+}
