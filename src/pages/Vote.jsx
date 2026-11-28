@@ -584,7 +584,12 @@ export default function Vote() {
                     {selected ? '✓' : ''}
                   </span>
                 </span>
-                <span className="nomineeName">{n.name}</span>
+                <span
+                  className="nomineeName"
+                  style={{ '--longest': Math.max(...n.name.split(/\s+/).map((w) => w.length)) }}
+                >
+                  {n.name}
+                </span>
               </button>
             )
           })}
